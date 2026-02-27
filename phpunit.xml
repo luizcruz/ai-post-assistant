@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
+  bootstrap="tests/php/bootstrap.php"
+  colors="true"
+  displayDetailsOnTestsThatTriggerWarnings="true"
+  displayDetailsOnTestsThatTriggerNotices="true"
+>
+  <testsuites>
+    <testsuite name="AI Post Assistant – PHP">
+      <directory>tests/php</directory>
+      <exclude>tests/php/bootstrap.php</exclude>
+    </testsuite>
+  </testsuites>
+
+  <coverage>
+    <include>
+      <file>ai-post-assistant.php</file>
+    </include>
+  </coverage>
+</phpunit>

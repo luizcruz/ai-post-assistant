@@ -1,0 +1,15 @@
+{
+  "name": "ai-post-assistant",
+  "version": "1.0.0",
+  "description": "AI Post Assistant – Gutenberg sidebar buttons for AI-powered titles and excerpts.",
+  "main": "build/index.js",
+  "scripts": {
+    "build":    "wp-scripts build",
+    "start":    "wp-scripts start",
+    "test:js":  "wp-scripts test-unit-js --config jest.config.js",
+    "test:php": "./vendor/bin/phpunit"
+  },
+  "devDependencies": {
+    "@wordpress/scripts": "^30.0.0"
+  }
+}

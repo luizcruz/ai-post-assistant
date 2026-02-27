@@ -1,0 +1,208 @@
+/* global LanguageModel, Summarizer, Translator */
+// The three identifiers above are Chrome's experimental on-device AI APIs.
+// They are injected into the global scope by the browser and have no npm
+// package / @types declaration, so we declare them here to silence the
+// TypeScript language server and ESLint's no-undef rule.
+
+// =============================================================================
+// fetchAIResponse – Chrome on-device AI (LanguageModel / Summarizer / Translator)
+// =============================================================================
+
+/**
+ * Dispatches to the correct Chrome AI pipeline based on promptType.
+ *
+ * - 'title'   → Chrome LanguageModel API  (mirrors titulos.js)
+ *               Returns an array of up to 3 SEO title strings.
+ *
+ * - 'excerpt' → Chrome Summarizer + Translator APIs  (mirrors resumo.js)
+ *               Returns a 1-element array with the PT-BR summary.
+ *               The Translator may need to download its language pack on first
+ *               use; pass onProgress to surface that to the UI.
+ *
+ * Requires Chrome ≥ 127 with the on-device AI origin trial / flags enabled:
+ *   chrome://flags/#optimization-guide-on-device-model
+ *   chrome://flags/#prompt-api-for-gemini-nano
+ *   chrome://flags/#summarization-api-for-gemini-nano
+ *   chrome://flags/#translation-api-without-language-pack-limit
+ *
+ * @param { 'title' | 'excerpt' } promptType
+ * @param { string }              contextText  Plain-text post content.
+ * @param { ((msg: string) => void) | null } onProgress
+ *        Called with human-readable progress messages (e.g. translation download %).
+ *        Only fires for the 'excerpt' pipeline.
+ * @returns { Promise<string[]> }
+ */
+export async function fetchAIResponse( promptType, contextText, onProgress = null ) {
+	if ( promptType === 'title' ) {
+		return fetchTitleSuggestions( contextText );
+	}
+	if ( promptType === 'excerpt' ) {
+		return fetchExcerptSuggestion( contextText, onProgress );
+	}
+	throw new Error( `Tipo de prompt desconhecido: ${ promptType }` );
+}
+
+// -----------------------------------------------------------------------------
+// Title pipeline – based on titulos.js
+// -----------------------------------------------------------------------------
+
+/**
+ * Uses Chrome's LanguageModel API to generate 3 SEO titles in Portuguese.
+ *
+ * Key decisions preserved from titulos.js:
+ *  - LanguageModel.create() is called WITHOUT a languageCode option to avoid
+ *    the NotAllowedError that occurs when forcing 'pt' on some Chrome builds.
+ *  - The prompt itself requests Portuguese output.
+ *  - The response is split on newlines and each line is cleaned with the same
+ *    regex used in titulos.js: strip leading numbering/bullets and quotes.
+ *  - Content is capped at 4 000 characters before being sent.
+ *
+ * @param { string } contextText
+ * @returns { Promise<string[]> }  Up to 3 title strings.
+ */
+async function fetchTitleSuggestions( contextText ) {
+	// Deliberately no { languageCode } option – see titulos.js line 26.
+	const session = await LanguageModel.create();
+
+	const seoPrompt = `
+    Crie 3 títulos de até 65 caracteres usando verbos de ação e urgência para capturar o impacto do fato esportivo.
+    Varie entre um ângulo de análise tática, um de repercussão emocional e um de "direto ao ponto" para SEO.
+    Retorne apenas os títulos, um por linha, sem numeração, aspas ou texto extra.
+
+    Contexto do texto:
+    ${ contextText.substring( 0, 4000 ) }
+  `;
+
+	const response = await session.prompt( [
+		{ role: 'user', content: [ { type: 'text', value: seoPrompt } ] },
+	] );
+
+	const responseText = typeof response === 'string' ? response : String( response );
+
+	return responseText
+		.split( '\n' )
+		.map( ( line ) =>
+			line
+				.replace( /^[\d.\-*]\s*/, '' )  // strip leading "1. " / "- " / "* "
+				.replace( /["']/g, '' )          // strip quotes
+				.trim()
+		)
+		.filter( ( line ) => line.length > 0 )
+		.slice( 0, 3 );
+}
+
+// -----------------------------------------------------------------------------
+// Excerpt pipeline – based on resumo.js
+// -----------------------------------------------------------------------------
+
+/**
+ * Uses Chrome's Summarizer API (EN) + Translator API (EN→PT) to produce a
+ * Portuguese key-points summary of the post content.
+ *
+ * Pipeline mirrors resumo.js exactly:
+ *  1. Summarizer.create({ type:'key-points', format:'markdown', length:'short',
+ *                          expectedOutputLanguage:'en' })
+ *  2. summarizer.summarize(text, { context: '...' })
+ *  3. Translator.create({ sourceLanguage:'en', targetLanguage:'pt', monitor })
+ *     - monitor fires downloadprogress events forwarded to onProgress().
+ *  4. translator.translate(summaryEn)
+ *
+ * Returns a 1-element array so SelectionModal renders a single "Apply" button.
+ *
+ * @param { string } contextText
+ * @param { ((msg: string) => void) | null } onProgress
+ * @returns { Promise<string[]> }
+ */
+async function fetchExcerptSuggestion( contextText, onProgress ) {
+	const summarizer = await Summarizer.create( {
+		type:                   'key-points',
+		format:                 'markdown',
+		length:                 'short',
+		expectedOutputLanguage: 'en',
+	} );
+
+	const summaryEn = await summarizer.summarize( contextText, {
+		context: 'This article is intended for a general audience.',
+	} );
+
+	const translator = await Translator.create( {
+		sourceLanguage: 'en',
+		targetLanguage: 'pt',
+		monitor( m ) {
+			m.addEventListener( 'downloadprogress', ( e ) => {
+				const percent = ( ( e.loaded / e.total ) * 100 ).toFixed( 0 );
+				onProgress?.( `Baixando pacote de tradução pela primeira vez (${ percent }%)…` );
+			} );
+		},
+	} );
+
+	const summaryPt = await translator.translate( summaryEn );
+
+	return [ summaryPt ];
+}
+
+// =============================================================================
+// sanitizeAIText – defence-in-depth against malformed / adversarial AI output
+// =============================================================================
+
+/**
+ * Strips HTML tags and control characters from AI output and enforces a
+ * maximum length before the value is written to the WordPress data store.
+ *
+ * Why this is necessary:
+ *  - The AI may hallucinate HTML/script tags if the source article contained
+ *    them (prompt-injection through post content).
+ *  - React already escapes text nodes automatically, but this function acts
+ *    as an additional layer so the string stored in the post is also clean.
+ *
+ * @param { unknown } text       Raw value from the AI.
+ * @param { number }  maxLength  Hard cap on output length (default 500).
+ * @returns { string }
+ */
+export function sanitizeAIText( text, maxLength = 500 ) {
+	if ( typeof text !== 'string' ) {
+		return '';
+	}
+
+	return text
+		.replace( /<[^>]*>/g, '' )                  // strip HTML / XML tags
+		.replace( /[\u0000-\u001F\u007F]/g, ' ' )   // replace control chars
+		.replace( /\s+/g, ' ' )                      // collapse whitespace
+		.trim()
+		.slice( 0, maxLength );
+}
+
+// =============================================================================
+// extractTextFromBlocks – reads block data from the Gutenberg store
+// =============================================================================
+
+/**
+ * Converts Gutenberg block objects into a plain-text string suitable for
+ * passing to the AI as context.
+ *
+ * Only `core/paragraph` blocks are used. Each block's `content` attribute is
+ * an HTML string (e.g. "Hello <strong>world</strong>"), so we strip the tags
+ * via a temporary DOM node before joining. Short paragraphs (≤ 5 words) are
+ * excluded to avoid padding the prompt with navigation text or captions.
+ *
+ * @param { Object[] } blocks  Array from wp.data.select('core/block-editor').getBlocks()
+ * @returns { string }
+ */
+export function extractTextFromBlocks( blocks ) {
+	if ( ! Array.isArray( blocks ) ) {
+		return '';
+	}
+
+	// Reuse a single container to avoid thrashing the GC.
+	const container = document.createElement( 'div' );
+
+	return blocks
+		.filter( ( block ) => block.name === 'core/paragraph' )
+		.map( ( block ) => {
+			// block.attributes.content is trusted editor HTML, not AI output.
+			container.innerHTML = block.attributes?.content ?? '';
+			return ( container.textContent ?? '' ).trim();
+		} )
+		.filter( ( text ) => text.split( /\s+/ ).filter( Boolean ).length > 5 )
+		.join( '\n\n' );
+}

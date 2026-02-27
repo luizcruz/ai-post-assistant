@@ -1,0 +1,13 @@
+{
+  "name": "your-vendor/ai-post-assistant",
+  "description": "AI Post Assistant WordPress plugin",
+  "require-dev": {
+    "phpunit/phpunit": "^10.5",
+    "brain/monkey":    "^2.6"
+  },
+  "config": {
+    "allow-plugins": {
+      "dealerdirect/phpcodesniffer-composer-installer": true
+    }
+  }
+}
