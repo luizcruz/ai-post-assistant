@@ -186,6 +186,10 @@ class AiPostAssistantTest extends TestCase {
 	// =========================================================================
 
 	public function test_enqueues_script_and_localizes_nonce_for_valid_screen(): void {
+		// Two Mockery ->once()->with() expectations below act as assertions;
+		// tell PHPUnit so this test is not flagged as risky.
+		$this->addToAssertionCount( 2 );
+
 		Functions\when( 'current_user_can' )->justReturn( true );
 		Functions\when( 'get_current_screen' )->justReturn( $this->validScreen() );
 
