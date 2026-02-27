@@ -125,9 +125,10 @@ class AiPostAssistantTest extends TestCase {
 	// =========================================================================
 
 	public function test_does_not_enqueue_when_user_lacks_permission(): void {
-		Functions\when( 'current_user_can' )->justReturn( false );
+		// Verification is done by Mockery->never() in tearDown, not by assert*.
+		$this->expectNotToPerformAssertions();
 
-		// If wp_enqueue_script is called, the test fails.
+		Functions\when( 'current_user_can' )->justReturn( false );
 		Functions\expect( 'wp_enqueue_script' )->never();
 		Functions\expect( 'wp_localize_script' )->never();
 
@@ -135,6 +136,8 @@ class AiPostAssistantTest extends TestCase {
 	}
 
 	public function test_does_not_enqueue_on_non_block_editor_screen(): void {
+		$this->expectNotToPerformAssertions();
+
 		Functions\when( 'current_user_can' )->justReturn( true );
 
 		$screen              = new WP_Screen();
@@ -142,13 +145,14 @@ class AiPostAssistantTest extends TestCase {
 		$screen->blockEditor = false;
 
 		Functions\when( 'get_current_screen' )->justReturn( $screen );
-
 		Functions\expect( 'wp_enqueue_script' )->never();
 
 		AI_Post_Assistant::enqueue_editor_assets();
 	}
 
 	public function test_does_not_enqueue_when_screen_base_is_not_post(): void {
+		$this->expectNotToPerformAssertions();
+
 		Functions\when( 'current_user_can' )->justReturn( true );
 
 		$screen              = new WP_Screen();
@@ -156,7 +160,6 @@ class AiPostAssistantTest extends TestCase {
 		$screen->blockEditor = true;
 
 		Functions\when( 'get_current_screen' )->justReturn( $screen );
-
 		Functions\expect( 'wp_enqueue_script' )->never();
 
 		AI_Post_Assistant::enqueue_editor_assets();
@@ -167,11 +170,12 @@ class AiPostAssistantTest extends TestCase {
 	// =========================================================================
 
 	public function test_does_not_enqueue_when_asset_file_does_not_exist(): void {
+		$this->expectNotToPerformAssertions();
+
 		Functions\when( 'current_user_can' )->justReturn( true );
 		Functions\when( 'get_current_screen' )->justReturn( $this->validScreen() );
 		Functions\when( 'plugin_dir_path' )->justReturn( '/nonexistent/path/' );
 		Functions\when( 'file_exists' )->justReturn( false );
-
 		Functions\expect( 'wp_enqueue_script' )->never();
 
 		AI_Post_Assistant::enqueue_editor_assets();
