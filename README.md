@@ -81,36 +81,46 @@ tests/
 
 ## Running the tests
 
-### JavaScript (Jest + React Testing Library)
+### Setup (once)
 
 ```bash
-npm install
-npm run test:js
+npm install       # JS dependencies (Jest, RTL, @wordpress/scripts…)
+composer install  # PHP dependencies (PHPUnit, Brain/Monkey)
 ```
 
-To run a single test file:
-```bash
-npm run test:js -- tests/js/aiHelper.test.js
-```
+---
 
-To run in watch mode:
-```bash
-npm run test:js -- --watch
-```
+### JavaScript — Jest + React Testing Library
 
-### PHP (PHPUnit + Brain/Monkey)
+| Goal | Command |
+|---|---|
+| All tests | `npm run test:js` |
+| Single file | `npm run test:js -- tests/js/aiHelper.test.js` |
+| Single test by name | `npm run test:js -- -t "strips HTML tags"` |
+| Watch mode (re-runs on save) | `npm run test:js -- --watch` |
+| With coverage report | `npm run test:js -- --coverage` |
 
-```bash
-composer install
-npm run test:php
-# or directly:
-./vendor/bin/phpunit
-```
+Test files live in `tests/js/`:
 
-To run a single test class:
-```bash
-./vendor/bin/phpunit --filter AiPostAssistantTest
-```
+| File | What it covers |
+|---|---|
+| `aiHelper.test.js` | `sanitizeAIText` (XSS, length, control chars) + `extractTextFromBlocks` |
+| `TitlesPanel.test.js` | Trigger button renders, opens modal with `type="title"`, closes |
+| `ResumoPanel.test.js` | Trigger button renders, opens modal with `type="excerpt"`, closes |
+| `SelectionModal.test.js` | Generate flow, XSS stripping, `editPost` dispatch with correct key |
+
+---
+
+### PHP — PHPUnit + Brain/Monkey
+
+| Goal | Command |
+|---|---|
+| All tests | `./vendor/bin/phpunit` |
+| Verbose (test names) | `./vendor/bin/phpunit --testdox` |
+| Single test class | `./vendor/bin/phpunit --filter AiPostAssistantTest` |
+| Single test method | `./vendor/bin/phpunit --filter test_returns_false_when_user_lacks_edit_posts_capability` |
+
+Test file: `tests/php/AiPostAssistantTest.php` — covers `is_valid_edit_screen()` and `enqueue_editor_assets()` under 12 scenarios (capability check, screen type, asset-file guard, happy path).
 
 ---
 
