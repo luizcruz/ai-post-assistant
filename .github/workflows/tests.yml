@@ -1,0 +1,70 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # JavaScript – Jest + React Testing Library
+  # ---------------------------------------------------------------------------
+  js:
+    name: JS tests (Jest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run JS tests
+        run: npm run test:js -- --ci --coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: js-coverage
+          path: coverage/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # PHP – PHPUnit + Brain/Monkey
+  # ---------------------------------------------------------------------------
+  php:
+    name: PHP tests (PHPUnit)
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        php: [ '8.1', '8.2', '8.3' ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate composer.json
+        run: composer validate --strict
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Run PHP tests
+        run: ./vendor/bin/phpunit --testdox
