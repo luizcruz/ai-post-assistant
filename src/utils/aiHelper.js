@@ -165,7 +165,9 @@ export function sanitizeAIText( text, maxLength = 500 ) {
 	}
 
 	return text
-		.replace( /<[^>]*>/g, '' )                  // strip HTML / XML tags
+		.replace( /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '' )  // strip <script>…</script> blocks (content included)
+		.replace( /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '' )     // strip <style>…</style> blocks (content included)
+		.replace( /<[^>]*>/g, '' )                  // strip remaining HTML / XML tags
 		.replace( /[\u0000-\u001F\u007F]/g, ' ' )   // replace control chars
 		.replace( /\s+/g, ' ' )                      // collapse whitespace
 		.trim()

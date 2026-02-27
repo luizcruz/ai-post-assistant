@@ -28,7 +28,7 @@ jest.mock( '@wordpress/components', () => ( {
 			{ children }
 		</button>
 	),
-} ) );
+} ), { virtual: true } );
 
 jest.mock( '@wordpress/element', () => ( {
 	...jest.requireActual( 'react' ),

@@ -43,7 +43,7 @@ jest.mock( '@wordpress/data', () => ( {
 		};
 		return selector( selectFn );
 	} ),
-} ) );
+} ), { virtual: true } );
 
 // Partial mock: real sanitizeAIText & extractTextFromBlocks logic so XSS
 // assertions are meaningful, but fetchAIResponse is controllable per-test.
@@ -68,7 +68,7 @@ jest.mock( '@wordpress/components', () => ( {
 		</button>
 	),
 	Spinner: () => <span aria-label="loading">...</span>,
-} ) );
+} ), { virtual: true } );
 
 jest.mock( '@wordpress/element', () => ( {
 	...jest.requireActual( 'react' ),
