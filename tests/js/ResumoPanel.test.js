@@ -31,11 +31,11 @@ jest.mock( '@wordpress/components', () => ( {
 
 jest.mock( '@wordpress/element', () => ( {
 	...jest.requireActual( 'react' ),
-} ) );
+} ), { virtual: true } );
 
 jest.mock( '@wordpress/i18n', () => ( {
 	__: ( text ) => text,
-} ) );
+} ), { virtual: true } );
 
 // ---------------------------------------------------------------------------
 // Tests
