@@ -1,8 +1,25 @@
 /* global LanguageModel, Summarizer, Translator */
 // The three identifiers above are Chrome's experimental on-device AI APIs.
-// They are injected into the global scope by the browser and have no npm
-// package / @types declaration, so we declare them here to silence the
+// @types declaration, so we declare them here to silence the
 // TypeScript language server and ESLint's no-undef rule.
+
+// =============================================================================
+// Settings – read once from the PHP-localized global
+// =============================================================================
+
+/**
+ * Plugin settings injected by wp_localize_script into window.aiPostAssistantData.
+ * Falls back to safe defaults so the plugin works even without saved options.
+ *
+ * @type {{ summarizerType: string, summarizerFormat: string, summarizerLength: string, seoPrompt: string }}
+ */
+const SETTINGS = window.aiPostAssistantData?.settings ?? {};
+
+const DEFAULT_SEO_PROMPT =
+	'Crie 3 títulos de até 65 caracteres usando verbos de ação e urgência para capturar o impacto do fato esportivo.\n' +
+	'Varie entre um ângulo de análise tática, um de repercussão emocional e um de "direto ao ponto".\n' +
+	'Retorne apenas os títulos, um por linha, sem numeração, aspas ou texto extra.\n\n' +
+	'Contexto do texto:\n{{context}}';
 
 // =============================================================================
 // fetchAIResponse – Chrome on-device AI (LanguageModel / Summarizer / Translator)
@@ -49,13 +66,16 @@ export async function fetchAIResponse( promptType, contextText, onProgress = nul
 /**
  * Uses Chrome's LanguageModel API to generate 3 SEO titles in Portuguese.
  *
+ * The prompt template is read from the plugin settings (saved via the
+ * WordPress settings page). If no custom prompt is saved, the default is used.
+ * The placeholder {{context}} in the template is replaced with the article text,
+ * capped at 4 000 characters.
+ *
  * Key decisions preserved from titulos.js:
  *  - LanguageModel.create() is called WITHOUT a languageCode option to avoid
  *    the NotAllowedError that occurs when forcing 'pt' on some Chrome builds.
- *  - The prompt itself requests Portuguese output.
  *  - The response is split on newlines and each line is cleaned with the same
  *    regex used in titulos.js: strip leading numbering/bullets and quotes.
- *  - Content is capped at 4 000 characters before being sent.
  *
  * @param { string } contextText
  * @returns { Promise<string[]> }  Up to 3 title strings.
@@ -64,14 +84,8 @@ async function fetchTitleSuggestions( contextText ) {
 	// Deliberately no { languageCode } option – see titulos.js line 26.
 	const session = await LanguageModel.create();
 
-	const seoPrompt = `
-    Crie 3 títulos de até 65 caracteres usando verbos de ação e urgência para capturar o impacto do fato esportivo.
-    Varie entre um ângulo de análise tática, um de repercussão emocional e um de "direto ao ponto" para SEO.
-    Retorne apenas os títulos, um por linha, sem numeração, aspas ou texto extra.
-
-    Contexto do texto:
-    ${ contextText.substring( 0, 4000 ) }
-  `;
+	const promptTemplate = SETTINGS.seoPrompt || DEFAULT_SEO_PROMPT;
+	const seoPrompt = promptTemplate.replace( '{{context}}', contextText.substring( 0, 4000 ) );
 
 	const response = await session.prompt( [
 		{ role: 'user', content: [ { type: 'text', value: seoPrompt } ] },
@@ -97,11 +111,13 @@ async function fetchTitleSuggestions( contextText ) {
 
 /**
  * Uses Chrome's Summarizer API (EN) + Translator API (EN→PT) to produce a
- * Portuguese key-points summary of the post content.
+ * Portuguese summary of the post content.
  *
- * Pipeline mirrors resumo.js exactly:
- *  1. Summarizer.create({ type:'key-points', format:'markdown', length:'short',
- *                          expectedOutputLanguage:'en' })
+ * The Summarizer options (type, format, length) are read from the plugin
+ * settings page. Defaults match the original resumo.js behaviour.
+ *
+ * Pipeline:
+ *  1. Summarizer.create({ type, format, length, expectedOutputLanguage:'en' })
  *  2. summarizer.summarize(text, { context: '...' })
  *  3. Translator.create({ sourceLanguage:'en', targetLanguage:'pt', monitor })
  *     - monitor fires downloadprogress events forwarded to onProgress().
@@ -115,9 +131,9 @@ async function fetchTitleSuggestions( contextText ) {
  */
 async function fetchExcerptSuggestion( contextText, onProgress ) {
 	const summarizer = await Summarizer.create( {
-		type:                   'key-points',
-		format:                 'markdown',
-		length:                 'short',
+		type:                   SETTINGS.summarizerType   || 'tldr',
+		format:                 SETTINGS.summarizerFormat || 'plain-text',
+		length:                 SETTINGS.summarizerLength || 'short',
 		expectedOutputLanguage: 'en',
 	} );
 
