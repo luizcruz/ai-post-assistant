@@ -9,15 +9,22 @@ import { getActiveLinkMap }      from '../utils/linkKeywords';
 /**
  * Consolidated AI assistant panel rendered in the Gutenberg sidebar.
  *
- * Renders three stacked action buttons:
- *  - ✨ IA Títulos  → opens SelectionModal (auto-generates SEO titles)
- *  - ✨ IA Resumo   → opens SelectionModal (auto-generates excerpt)
- *  - ✨ IA Links    → directly injects keyword links into paragraph blocks
+ * Reads `window.aiPostAssistantData.settings` to determine which buttons
+ * are active (enableTitles / enableResumo / enableLinks). Disabled features
+ * are not rendered. If all three are disabled the panel shows a notice.
  *
- * Each action executes as soon as the button is clicked, with no
- * secondary "Gerar" button required.
+ * Each visible button executes immediately on click:
+ *  - IA Títulos / IA Resumo → opens SelectionModal (auto-generates on mount)
+ *  - IA Links               → injects keyword links directly into editor blocks
  */
 export default function AIAssistantPanel() {
+	const settings = window.aiPostAssistantData?.settings ?? {};
+
+	// Feature flags – default to true when not yet saved (first install).
+	const enableTitles = settings.enableTitles !== false;
+	const enableResumo = settings.enableResumo !== false;
+	const enableLinks  = settings.enableLinks  !== false;
+
 	// null = no modal open; 'title' | 'excerpt' = modal type open
 	const [ openModal, setOpenModal ] = useState( null );
 
@@ -38,7 +45,6 @@ export default function AIAssistantPanel() {
 	function handleInjectLinks() {
 		setLinksStatus( '' );
 
-		const settings      = window.aiPostAssistantData?.settings ?? {};
 		const maxPerKeyword = Math.max( 1, Number( settings.linkMaxPerKeyword ) || 2 );
 		const linkMap       = getActiveLinkMap();
 
@@ -63,40 +69,53 @@ export default function AIAssistantPanel() {
 	// Render
 	// ------------------------------------------------------------------
 
+	const noneActive = ! enableTitles && ! enableResumo && ! enableLinks;
+
 	return (
 		<>
-			{ /* ── Action buttons ── */ }
-			<div className="ai-post-assistant__actions">
-				<Button
-					variant="primary"
-					onClick={ () => {
-						setLinksStatus( '' );
-						setOpenModal( 'title' );
-					} }
-					className="ai-post-assistant__trigger-btn"
-				>
-					{ __( '✨ IA Títulos', 'ai-post-assistant' ) }
-				</Button>
+			{ noneActive ? (
+				<p className="ai-post-assistant__status ai-post-assistant__status--empty">
+					{ __( 'Todos os recursos estão desativados. Ative-os em Configurações → AI Post Assistant.', 'ai-post-assistant' ) }
+				</p>
+			) : (
+				<div className="ai-post-assistant__actions">
+					{ enableTitles && (
+						<Button
+							variant="primary"
+							onClick={ () => {
+								setLinksStatus( '' );
+								setOpenModal( 'title' );
+							} }
+							className="ai-post-assistant__trigger-btn"
+						>
+							{ __( '✨ IA Títulos', 'ai-post-assistant' ) }
+						</Button>
+					) }
 
-				<Button
-					variant="primary"
-					onClick={ () => {
-						setLinksStatus( '' );
-						setOpenModal( 'excerpt' );
-					} }
-					className="ai-post-assistant__trigger-btn"
-				>
-					{ __( '✨ IA Resumo', 'ai-post-assistant' ) }
-				</Button>
+					{ enableResumo && (
+						<Button
+							variant="primary"
+							onClick={ () => {
+								setLinksStatus( '' );
+								setOpenModal( 'excerpt' );
+							} }
+							className="ai-post-assistant__trigger-btn"
+						>
+							{ __( '✨ IA Resumo', 'ai-post-assistant' ) }
+						</Button>
+					) }
 
-				<Button
-					variant="primary"
-					onClick={ handleInjectLinks }
-					className="ai-post-assistant__trigger-btn"
-				>
-					{ __( '✨ IA Links', 'ai-post-assistant' ) }
-				</Button>
-			</div>
+					{ enableLinks && (
+						<Button
+							variant="primary"
+							onClick={ handleInjectLinks }
+							className="ai-post-assistant__trigger-btn"
+						>
+							{ __( '✨ IA Links', 'ai-post-assistant' ) }
+						</Button>
+					) }
+				</div>
+			) }
 
 			{ /* ── IA Links feedback ── */ }
 			{ linksStatus === 'done' && (

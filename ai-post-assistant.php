@@ -24,10 +24,17 @@ final class AI_Post_Assistant {
 	private const NONCE_ACTION = 'ai_post_assistant_nonce';
 
 	// ── Option keys ───────────────────────────────────────────────────────────
+	// Feature toggles (stored as '1' / '0')
+	private const OPT_ENABLE_TITLES          = 'ai_pa_enable_titles';
+	private const OPT_ENABLE_RESUMO          = 'ai_pa_enable_resumo';
+	private const OPT_ENABLE_LINKS           = 'ai_pa_enable_links';
+	// Summarizer (IA Resumo)
 	private const OPT_SUMMARIZER_TYPE        = 'ai_pa_summarizer_type';
 	private const OPT_SUMMARIZER_FORMAT      = 'ai_pa_summarizer_format';
 	private const OPT_SUMMARIZER_LENGTH      = 'ai_pa_summarizer_length';
+	// LanguageModel prompt (IA Títulos)
 	private const OPT_SEO_PROMPT             = 'ai_pa_seo_prompt';
+	// Link injector (IA Links)
 	private const OPT_LINK_MAX_PER_KEYWORD   = 'ai_pa_link_max_per_keyword';
 	private const OPT_LINK_MAP               = 'ai_pa_link_map';
 
@@ -91,6 +98,10 @@ final class AI_Post_Assistant {
 	 */
 	public static function get_settings(): array {
 		return [
+			// Feature toggles – true = active, false = hidden in the editor
+			'enableTitles'      => '1' === get_option( self::OPT_ENABLE_TITLES, '1' ),
+			'enableResumo'      => '1' === get_option( self::OPT_ENABLE_RESUMO, '1' ),
+			'enableLinks'       => '1' === get_option( self::OPT_ENABLE_LINKS, '1' ),
 			// Summarizer (IA Resumo)
 			'summarizerType'    => (string) get_option( self::OPT_SUMMARIZER_TYPE, 'tldr' ),
 			'summarizerFormat'  => (string) get_option( self::OPT_SUMMARIZER_FORMAT, 'plain-text' ),
@@ -116,6 +127,40 @@ final class AI_Post_Assistant {
 	}
 
 	public static function register_settings(): void {
+
+		// ── Recursos ativos ───────────────────────────────────────────────────
+		add_settings_section(
+			'ai_pa_features_section',
+			__( 'Recursos ativos', 'ai-post-assistant' ),
+			static function (): void {
+				echo '<p>' . esc_html__(
+					'Ative ou desative cada recurso. Botões desativados não aparecem na barra lateral do editor.',
+					'ai-post-assistant'
+				) . '</p>';
+			},
+			'ai-post-assistant'
+		);
+
+		foreach ( [
+			self::OPT_ENABLE_TITLES => '✨ IA Títulos',
+			self::OPT_ENABLE_RESUMO => '✨ IA Resumo',
+			self::OPT_ENABLE_LINKS  => '✨ IA Links',
+		] as $option => $label ) {
+			register_setting( 'ai_post_assistant', $option, [
+				'type'              => 'string',
+				'sanitize_callback' => static fn( $v ) => '1' === (string) $v ? '1' : '0',
+				'default'           => '1',
+			] );
+			add_settings_field(
+				$option,
+				esc_html( $label ),
+				static function () use ( $option, $label ): void {
+					AI_Post_Assistant::render_toggle_field( $option, $label );
+				},
+				'ai-post-assistant',
+				'ai_pa_features_section'
+			);
+		}
 
 		// ── IA Resumo – Summarizer ─────────────────────────────────────────────
 		add_settings_section(
@@ -208,6 +253,28 @@ final class AI_Post_Assistant {
 	}
 
 	// ── Field renderers ───────────────────────────────────────────────────────
+
+	/**
+	 * Renders a toggle switch (checkbox + hidden field) for a feature toggle.
+	 * The hidden input ensures "0" is submitted when the checkbox is unchecked.
+	 */
+	public static function render_toggle_field( string $option, string $label ): void {
+		$enabled = '1' === get_option( $option, '1' );
+		printf(
+			'<label class="ai-pa-toggle">
+				<input type="hidden"   name="%1$s" value="0" />
+				<input type="checkbox" name="%1$s" id="%1$s" value="1"%2$s />
+				<span class="ai-pa-toggle__track"></span>
+				<span class="ai-pa-toggle__label">%3$s</span>
+			</label>',
+			esc_attr( $option ),
+			checked( $enabled, true, false ),
+			esc_html( $enabled
+				? __( 'Ativado', 'ai-post-assistant' )
+				: __( 'Desativado', 'ai-post-assistant' )
+			)
+		);
+	}
 
 	public static function render_summarizer_type_field(): void {
 		$value   = (string) get_option( self::OPT_SUMMARIZER_TYPE, 'tldr' );
@@ -346,6 +413,23 @@ final class AI_Post_Assistant {
 			return;
 		}
 		?>
+		<style>
+			.ai-pa-toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+			.ai-pa-toggle input[type="checkbox"] { display: none; }
+			.ai-pa-toggle__track {
+				position: relative; width: 44px; height: 24px;
+				background: #c3c4c7; border-radius: 12px; transition: background .2s;
+			}
+			.ai-pa-toggle__track::after {
+				content: ''; position: absolute; top: 3px; left: 3px;
+				width: 18px; height: 18px; border-radius: 50%;
+				background: #fff; transition: transform .2s;
+			}
+			.ai-pa-toggle input:checked ~ .ai-pa-toggle__track { background: #2271b1; }
+			.ai-pa-toggle input:checked ~ .ai-pa-toggle__track::after { transform: translateX(20px); }
+			.ai-pa-toggle__label { font-weight: 600; color: #50575e; }
+			.ai-pa-toggle input:checked ~ .ai-pa-toggle__track + .ai-pa-toggle__label { color: #2271b1; }
+		</style>
 		<div class="wrap">
 			<h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
 			<form method="post" action="options.php">

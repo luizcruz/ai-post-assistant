@@ -1,11 +1,14 @@
 # AI Post Assistant
 
-WordPress plugin that adds two AI-powered buttons to the Gutenberg sidebar:
+WordPress plugin that adds an AI-powered panel to the Gutenberg editor sidebar with three on-device AI tools:
 
-- **✨ IA Títulos** — generates 3 SEO-optimised title suggestions (≤ 65 chars) using Chrome's on-device `LanguageModel` API.
-- **✨ IA Resumo** — generates a key-points summary in PT-BR using Chrome's `Summarizer` + `Translator` APIs.
+| Button | What it does |
+|---|---|
+| **✨ IA Títulos** | Generates 3 SEO-optimised title suggestions (≤ 65 chars) using Chrome's `LanguageModel` API. |
+| **✨ IA Resumo** | Generates a PT-BR summary using Chrome's `Summarizer` + `Translator` APIs. |
+| **✨ IA Links** | Scans paragraph blocks and inserts up to N anchor links per keyword from a configurable list. |
 
-Both pipelines run entirely on-device. No data leaves the browser and no external API key is required.
+All pipelines run entirely **on-device via Chrome's experimental AI APIs**. No data leaves the browser and no external API key is required.
 
 ---
 
@@ -21,7 +24,7 @@ Chrome ≥ 127 with the following flags enabled at `chrome://flags`:
 | `#summarization-api-for-gemini-nano` | Enabled |
 | `#translation-api-without-language-pack-limit` | Enabled |
 
-After enabling the flags, open `chrome://components` and trigger a manual update for **Optimization Guide On Device Model** so Gemini Nano is downloaded.
+After enabling the flags, open `chrome://components` and trigger a manual update for **Optimization Guide On Device Model** to download Gemini Nano.
 
 ### Server
 | Requirement | Minimum |
@@ -50,7 +53,72 @@ After enabling the flags, open `chrome://components` and trigger a manual update
 
 3. Activate the plugin in **WordPress Admin → Plugins**.
 
-4. Open any post in the Gutenberg editor. The **✨ IA Títulos** and **✨ IA Resumo** panels appear in the right sidebar.
+4. Open any post in the Gutenberg editor. The **✨ AI Post Assistant** panel appears in the right sidebar.
+
+---
+
+## Admin settings
+
+Go to **Configurações → AI Post Assistant** to customise all plugin behaviour.
+
+### Recursos ativos
+Toggle each feature on or off independently. Disabled buttons are hidden in the editor sidebar.
+
+| Toggle | Default | Description |
+|---|---|---|
+| ✨ IA Títulos | On | Show/hide the title suggestion button |
+| ✨ IA Resumo | On | Show/hide the excerpt summary button |
+| ✨ IA Links | On | Show/hide the keyword link injection button |
+
+### IA Resumo – Summarizer API
+
+| Setting | Options | Default | Description |
+|---|---|---|---|
+| Tipo de resumo | `tldr`, `key-points`, `headline` | `tldr` | Strategy passed to `Summarizer.create()` |
+| Formato de saída | `plain-text`, `markdown` | `plain-text` | Output format of the raw summary |
+| Comprimento | `short`, `medium`, `long` | `short` | Verbosity of the generated summary |
+
+### IA Títulos – Prompt
+
+Free-text prompt sent to Chrome's `LanguageModel`. Use `{{context}}` as the placeholder for the article body (capped at 4 000 characters).
+
+### IA Links
+
+| Setting | Default | Description |
+|---|---|---|
+| Máximo de links por palavra-chave | `2` | How many times the same keyword can be linked in a single article (1–10) |
+| Lista de links (JSON) | *(plugin default)* | JSON array of `{ "url": "...", "keywords": ["..."] }` objects. Leave empty to use the built-in list of 37 Brazilian sports keywords. |
+
+**JSON format example:**
+```json
+[
+  { "url": "https://lance.com.br/flamengo",   "keywords": ["Flamengo"] },
+  { "url": "https://lance.com.br/palmeiras",  "keywords": ["Palmeiras"] },
+  { "url": "https://lance.com.br/tudo-sobre/copa-libertadores", "keywords": ["Copa Libertadores", "Libertadores"] }
+]
+```
+Keywords within each entry are tried **most-specific first**, so `"Santos FC"` is matched before `"Santos"` to avoid the shorter term consuming both link slots when the longer form is present.
+
+---
+
+## How it works
+
+### IA Títulos flow
+1. Reads all `core/paragraph` blocks (≥ 6 words each) from the Gutenberg store.
+2. Sends the text (+ the configured prompt) to `LanguageModel.create()`.
+3. A modal opens immediately with the 3 generated titles — click one to apply it to the post title field.
+
+### IA Resumo flow
+1. Reads paragraph blocks as above.
+2. Calls `Summarizer.create()` with the configured `type / format / length`.
+3. Translates the English summary to Portuguese via `Translator.create({ sourceLanguage:'en', targetLanguage:'pt' })`.
+4. A modal opens with the result — click to apply it to the post excerpt field.
+
+### IA Links flow
+1. Reads the active link map (admin JSON or built-in list) and the `maxPerKeyword` setting.
+2. Counts links already present in the editor so re-clicking stays idempotent.
+3. Uses DOM-based text-node walking (no raw-HTML regex) to inject `<a>` tags, respecting existing anchors to prevent nesting.
+4. Applies changes directly to the affected blocks via `updateBlockAttributes()`.
 
 ---
 
@@ -64,17 +132,22 @@ The bundle is rebuilt on every file save. Reload the editor page to pick up chan
 
 ### Project structure
 ```
-src/
-  index.js                  # registers both PluginDocumentSettingPanel slots
-  components/
-    TitlesPanel.jsx          # trigger button for title generation
-    ResumoPanel.jsx          # trigger button for excerpt generation
-    SelectionModal.jsx       # shared modal: generate → sanitise → dispatch
-  utils/
-    aiHelper.js              # Chrome AI pipelines + sanitiseAIText + extractTextFromBlocks
-tests/
-  js/                        # Jest / React Testing Library
-  php/                       # PHPUnit + Brain/Monkey
+ai-post-assistant/
+├── ai-post-assistant.php          # Plugin bootstrap, settings page (PHP)
+├── build/                         # Compiled assets (generated — not committed)
+├── src/
+│   ├── index.js                   # Registers the single PluginDocumentSettingPanel
+│   ├── components/
+│   │   ├── AIAssistantPanel.jsx   # Consolidated panel: 3 stacked action buttons
+│   │   └── SelectionModal.jsx     # Auto-generating modal for titles / resumo
+│   └── utils/
+│       ├── aiHelper.js            # Chrome AI pipelines + sanitizeAIText + extractTextFromBlocks
+│       ├── linkInjector.js        # DOM-based keyword link injector (idempotent)
+│       └── linkKeywords.js        # Built-in keyword→URL map + getActiveLinkMap()
+├── tests/
+│   ├── js/                        # Jest + React Testing Library
+│   └── php/                       # PHPUnit + Brain/Monkey
+└── ...
 ```
 
 ---
@@ -82,13 +155,10 @@ tests/
 ## Running the tests
 
 ### Setup (once)
-
 ```bash
 npm install       # JS dependencies (Jest, RTL, @wordpress/scripts…)
 composer install  # PHP dependencies (PHPUnit, Brain/Monkey)
 ```
-
----
 
 ### JavaScript — Jest + React Testing Library
 
@@ -97,19 +167,8 @@ composer install  # PHP dependencies (PHPUnit, Brain/Monkey)
 | All tests | `npm run test:js` |
 | Single file | `npm run test:js -- tests/js/aiHelper.test.js` |
 | Single test by name | `npm run test:js -- -t "strips HTML tags"` |
-| Watch mode (re-runs on save) | `npm run test:js -- --watch` |
-| With coverage report | `npm run test:js -- --coverage` |
-
-Test files live in `tests/js/`:
-
-| File | What it covers |
-|---|---|
-| `aiHelper.test.js` | `sanitizeAIText` (XSS, length, control chars) + `extractTextFromBlocks` |
-| `TitlesPanel.test.js` | Trigger button renders, opens modal with `type="title"`, closes |
-| `ResumoPanel.test.js` | Trigger button renders, opens modal with `type="excerpt"`, closes |
-| `SelectionModal.test.js` | Generate flow, XSS stripping, `editPost` dispatch with correct key |
-
----
+| Watch mode | `npm run test:js -- --watch` |
+| Coverage report | `npm run test:js -- --coverage` |
 
 ### PHP — PHPUnit + Brain/Monkey
 
@@ -129,6 +188,8 @@ Test file: `tests/php/AiPostAssistantTest.php` — covers `is_valid_edit_screen(
 | Layer | Mechanism |
 |---|---|
 | Script loading | `current_user_can('edit_posts')` + block-editor screen check before any JS is enqueued |
+| Settings page | `current_user_can('manage_options')` + Settings API nonce + per-field sanitizers (allowlist for selects, `sanitize_textarea_field` for text, JSON structural validation for the link map) |
 | CSRF baseline | `wp_create_nonce` localised to JS via `wp_localize_script` |
 | AI output (render) | React renders suggestion strings as text nodes — `dangerouslySetInnerHTML` is absent from the entire codebase |
-| AI output (store) | `sanitizeAIText()` strips HTML tags and control characters before `editPost()` is called |
+| AI output (store) | `sanitizeAIText()` strips `<script>`, `<style>`, all HTML tags and control characters before `editPost()` is called |
+| Link injection | DOM-based text-node walking ensures no raw HTML is mutated by string replacement; existing `<a>` elements are never descended into |
