@@ -71,14 +71,16 @@ export default function AIAssistantPanel() {
 
 	const noneActive = ! enableTitles && ! enableResumo && ! enableLinks;
 
+	const btnStyle = { width: '100%', justifyContent: 'center' };
+
 	return (
 		<>
 			{ noneActive ? (
-				<p className="ai-post-assistant__status ai-post-assistant__status--empty">
+				<p style={ { color: '#757575', fontSize: '12px', margin: '4px 0 0' } }>
 					{ __( 'Todos os recursos estão desativados. Ative-os em Configurações → AI Post Assistant.', 'ai-post-assistant' ) }
 				</p>
 			) : (
-				<div className="ai-post-assistant__actions">
+				<div style={ { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' } }>
 					{ enableTitles && (
 						<Button
 							variant="primary"
@@ -86,7 +88,7 @@ export default function AIAssistantPanel() {
 								setLinksStatus( '' );
 								setOpenModal( 'title' );
 							} }
-							className="ai-post-assistant__trigger-btn"
+							style={ btnStyle }
 						>
 							{ __( '✨ IA Títulos', 'ai-post-assistant' ) }
 						</Button>
@@ -99,7 +101,7 @@ export default function AIAssistantPanel() {
 								setLinksStatus( '' );
 								setOpenModal( 'excerpt' );
 							} }
-							className="ai-post-assistant__trigger-btn"
+							style={ btnStyle }
 						>
 							{ __( '✨ IA Resumo', 'ai-post-assistant' ) }
 						</Button>
@@ -109,7 +111,7 @@ export default function AIAssistantPanel() {
 						<Button
 							variant="primary"
 							onClick={ handleInjectLinks }
-							className="ai-post-assistant__trigger-btn"
+							style={ btnStyle }
 						>
 							{ __( '✨ IA Links', 'ai-post-assistant' ) }
 						</Button>
@@ -119,7 +121,7 @@ export default function AIAssistantPanel() {
 
 			{ /* ── IA Links feedback ── */ }
 			{ linksStatus === 'done' && (
-				<p className="ai-post-assistant__status ai-post-assistant__status--ok">
+				<p style={ { margin: '4px 0 0', fontSize: '12px', color: '#2271b1' } }>
 					{ linksAdded === 1
 						? __( '1 link inserido.', 'ai-post-assistant' )
 						: `${ linksAdded } ${ __( 'links inseridos.', 'ai-post-assistant' ) }`
@@ -127,7 +129,7 @@ export default function AIAssistantPanel() {
 				</p>
 			) }
 			{ linksStatus === 'none' && (
-				<p className="ai-post-assistant__status ai-post-assistant__status--empty">
+				<p style={ { margin: '4px 0 0', fontSize: '12px', color: '#757575' } }>
 					{ __( 'Nenhuma palavra-chave encontrada.', 'ai-post-assistant' ) }
 				</p>
 			) }
