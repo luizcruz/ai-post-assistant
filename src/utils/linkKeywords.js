@@ -1,4 +1,32 @@
 /**
+ * getActiveLinkMap – returns the link map to use at runtime.
+ *
+ * Reads `window.aiPostAssistantData.settings.linkMap` (saved via the admin
+ * settings page). If the option is empty or contains invalid JSON the
+ * hardcoded LINK_MAP below is used as a safe fallback.
+ *
+ * @returns { Array<{url: string, keywords: string[]}> }
+ */
+export function getActiveLinkMap() {
+	const raw = window.aiPostAssistantData?.settings?.linkMap ?? '';
+
+	if ( raw.trim() ) {
+		try {
+			const parsed = JSON.parse( raw );
+			if ( Array.isArray( parsed ) && parsed.length > 0 ) {
+				return parsed;
+			}
+		} catch {
+			// Invalid JSON – fall back to the default list below.
+		}
+	}
+
+	return LINK_MAP;
+}
+
+// =============================================================================
+
+/**
  * LINK_MAP – keyword-to-URL mapping for the "IA Links" feature.
  *
  * Each entry defines:

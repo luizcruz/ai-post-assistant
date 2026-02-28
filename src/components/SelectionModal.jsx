@@ -1,7 +1,7 @@
-import { useState }            from '@wordpress/element';
-import { Modal, Button, Spinner } from '@wordpress/components';
-import { useDispatch, useSelect } from '@wordpress/data';
-import { __ }                     from '@wordpress/i18n';
+import { useState, useEffect, useCallback } from '@wordpress/element';
+import { Modal, Button, Spinner }           from '@wordpress/components';
+import { useDispatch, useSelect }           from '@wordpress/data';
+import { __ }                               from '@wordpress/i18n';
 import {
 	fetchAIResponse,
 	sanitizeAIText,
@@ -19,21 +19,20 @@ const MODAL_LABELS = {
 
 /**
  * Floating modal that:
- *  1. Reads the current post's block content.
- *  2. Calls fetchAIResponse() (placeholder – user inserts native AI API here).
- *  3. Sanitizes every suggestion before rendering or saving.
+ *  1. Auto-starts generation as soon as it mounts (no manual "Gerar" button).
+ *  2. Reads the current post's block content.
+ *  3. Calls fetchAIResponse() and sanitizes every suggestion.
  *  4. Writes the selected suggestion to the post title or excerpt via wp.data.
  *
  * XSS note: All suggestion strings are rendered as React text nodes ({text}).
- * React never calls innerHTML for these, so no script tags can be injected.
  * dangerouslySetInnerHTML is intentionally absent from this file.
  *
  * @param {{ type: 'title'|'excerpt', onClose: () => void }} props
  */
 export default function SelectionModal( { type, onClose } ) {
-	const [ suggestions, setSuggestions ]       = useState( [] );
-	const [ isLoading, setIsLoading ]           = useState( false );
-	const [ error, setError ]                   = useState( '' );
+	const [ suggestions, setSuggestions ]         = useState( [] );
+	const [ isLoading, setIsLoading ]             = useState( true );  // start loading immediately
+	const [ error, setError ]                     = useState( '' );
 	const [ progressMessage, setProgressMessage ] = useState( '' );
 
 	const { editPost } = useDispatch( 'core/editor' );
@@ -45,10 +44,10 @@ export default function SelectionModal( { type, onClose } ) {
 	const maxLen = MAX_LENGTHS[ type ] ?? 500;
 
 	// ------------------------------------------------------------------
-	// Handlers
+	// Generation – called once on mount
 	// ------------------------------------------------------------------
 
-	async function handleGenerate() {
+	const handleGenerate = useCallback( async () => {
 		setIsLoading( true );
 		setError( '' );
 		setSuggestions( [] );
@@ -66,15 +65,10 @@ export default function SelectionModal( { type, onClose } ) {
 				);
 			}
 
-			// onProgress is forwarded to the Translator's downloadprogress event
-			// (excerpt pipeline only). Titles ignore it.
 			const raw = await fetchAIResponse( type, contextText, setProgressMessage );
 
-			// Sanitize every string returned by the AI before storing in state.
 			setSuggestions( raw.map( ( text ) => sanitizeAIText( text, maxLen ) ) );
 		} catch ( err ) {
-			// err.message is a plain string produced by our own code or the AI
-			// API; treat it as untrusted and render as a text node only.
 			setError(
 				typeof err?.message === 'string' ? err.message : String( err )
 			);
@@ -82,14 +76,22 @@ export default function SelectionModal( { type, onClose } ) {
 			setIsLoading( false );
 			setProgressMessage( '' );
 		}
-	}
+	// blocks and maxLen come from the outer scope at mount time; the
+	// empty-deps array is intentional – we want a single auto-run.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [] );
+
+	// Auto-trigger generation the moment the modal opens.
+	useEffect( () => {
+		handleGenerate();
+	}, [ handleGenerate ] );
+
+	// ------------------------------------------------------------------
+	// Selection
+	// ------------------------------------------------------------------
 
 	function handleSelect( text ) {
 		const key = type === 'title' ? 'title' : 'excerpt';
-
-		// Defence-in-depth: re-sanitize on selection even though state was
-		// already sanitized on generation, to guard against any future state
-		// manipulation bugs.
 		editPost( { [ key ]: sanitizeAIText( text, maxLen ) } );
 		onClose();
 	}
@@ -104,39 +106,35 @@ export default function SelectionModal( { type, onClose } ) {
 			onRequestClose={ onClose }
 			className="ai-post-assistant__modal"
 		>
-			{ /* ── Generate button ── */ }
-			<Button
-				variant="primary"
-				onClick={ handleGenerate }
-				disabled={ isLoading }
-				className="ai-post-assistant__generate-btn"
-			>
-				{ isLoading ? (
-					<>
-						<Spinner />
-						{ progressMessage || __( ' Gerando…', 'ai-post-assistant' ) }
-					</>
-				) : (
-					__( 'Gerar Sugestões', 'ai-post-assistant' )
-				) }
-			</Button>
-
-			{ /* ── Error message – plain text node, never raw HTML ── */ }
-			{ error && (
-				<p
-					className="ai-post-assistant__error"
-					role="alert"
-				>
-					{ error }
-				</p>
+			{ /* ── Loading state ── */ }
+			{ isLoading && (
+				<div className="ai-post-assistant__loading">
+					<Spinner />
+					<span>{ progressMessage || __( ' Gerando sugestões…', 'ai-post-assistant' ) }</span>
+				</div>
 			) }
 
-			{ /* ── Suggestion list ──
-			     React renders {text} as a text node; no innerHTML path exists.
-			     If the AI hallucinated <script>…</script>, it is displayed as
-			     literal characters, not executed.
-			── */ }
-			{ suggestions.length > 0 && (
+			{ /* ── Error state ── */ }
+			{ ! isLoading && error && (
+				<>
+					<p
+						className="ai-post-assistant__error"
+						role="alert"
+					>
+						{ error }
+					</p>
+					<Button
+						variant="secondary"
+						onClick={ handleGenerate }
+						className="ai-post-assistant__retry-btn"
+					>
+						{ __( 'Tentar novamente', 'ai-post-assistant' ) }
+					</Button>
+				</>
+			) }
+
+			{ /* ── Suggestion list ── */ }
+			{ ! isLoading && suggestions.length > 0 && (
 				<ul className="ai-post-assistant__suggestions">
 					{ suggestions.map( ( text, index ) => (
 						<li key={ index }>

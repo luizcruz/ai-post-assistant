@@ -23,11 +23,13 @@ final class AI_Post_Assistant {
 	private const HANDLE       = 'ai-post-assistant-editor';
 	private const NONCE_ACTION = 'ai_post_assistant_nonce';
 
-	// Option keys stored in wp_options.
-	private const OPT_SUMMARIZER_TYPE   = 'ai_pa_summarizer_type';
-	private const OPT_SUMMARIZER_FORMAT = 'ai_pa_summarizer_format';
-	private const OPT_SUMMARIZER_LENGTH = 'ai_pa_summarizer_length';
-	private const OPT_SEO_PROMPT        = 'ai_pa_seo_prompt';
+	// ── Option keys ───────────────────────────────────────────────────────────
+	private const OPT_SUMMARIZER_TYPE        = 'ai_pa_summarizer_type';
+	private const OPT_SUMMARIZER_FORMAT      = 'ai_pa_summarizer_format';
+	private const OPT_SUMMARIZER_LENGTH      = 'ai_pa_summarizer_length';
+	private const OPT_SEO_PROMPT             = 'ai_pa_seo_prompt';
+	private const OPT_LINK_MAX_PER_KEYWORD   = 'ai_pa_link_max_per_keyword';
+	private const OPT_LINK_MAP               = 'ai_pa_link_map';
 
 	/**
 	 * Default SEO prompt sent to Chrome's LanguageModel API.
@@ -46,12 +48,8 @@ final class AI_Post_Assistant {
 	}
 
 	/**
-	 * Enqueues the compiled JS bundle for the block editor.
-	 *
-	 * Guards:
-	 *  - Only on block-editor screens (base === 'post').
-	 *  - Only for users who have the `edit_posts` capability.
-	 *  - Only when the compiled asset file actually exists on disk.
+	 * Enqueues the compiled JS bundle for the block editor and passes the
+	 * current plugin settings to the script via wp_localize_script.
 	 */
 	public static function enqueue_editor_assets(): void {
 		if ( ! self::is_valid_edit_screen() ) {
@@ -78,35 +76,35 @@ final class AI_Post_Assistant {
 			self::HANDLE,
 			'aiPostAssistantData',
 			[
-				'nonce'   => wp_create_nonce( self::NONCE_ACTION ),
-				'ajaxUrl' => esc_url( admin_url( 'admin-ajax.php' ) ),
+				'nonce'    => wp_create_nonce( self::NONCE_ACTION ),
+				'ajaxUrl'  => esc_url( admin_url( 'admin-ajax.php' ) ),
 				'settings' => self::get_settings(),
 			]
 		);
 	}
 
 	/**
-	 * Returns the current plugin settings as an associative array,
-	 * using defaults when an option has never been saved.
+	 * Returns all plugin settings as an associative array ready for
+	 * wp_localize_script. Empty strings signal "use JS-side defaults".
 	 *
-	 * @return array<string, string>
+	 * @return array<string, mixed>
 	 */
 	public static function get_settings(): array {
 		return [
-			'summarizerType'   => (string) get_option( self::OPT_SUMMARIZER_TYPE, 'tldr' ),
-			'summarizerFormat' => (string) get_option( self::OPT_SUMMARIZER_FORMAT, 'plain-text' ),
-			'summarizerLength' => (string) get_option( self::OPT_SUMMARIZER_LENGTH, 'short' ),
-			'seoPrompt'        => (string) get_option( self::OPT_SEO_PROMPT, self::DEFAULT_SEO_PROMPT ),
+			// Summarizer (IA Resumo)
+			'summarizerType'    => (string) get_option( self::OPT_SUMMARIZER_TYPE, 'tldr' ),
+			'summarizerFormat'  => (string) get_option( self::OPT_SUMMARIZER_FORMAT, 'plain-text' ),
+			'summarizerLength'  => (string) get_option( self::OPT_SUMMARIZER_LENGTH, 'short' ),
+			// LanguageModel prompt (IA Títulos)
+			'seoPrompt'         => (string) get_option( self::OPT_SEO_PROMPT, self::DEFAULT_SEO_PROMPT ),
+			// Link injector (IA Links)
+			'linkMaxPerKeyword' => max( 1, (int) get_option( self::OPT_LINK_MAX_PER_KEYWORD, 2 ) ),
+			'linkMap'           => (string) get_option( self::OPT_LINK_MAP, '' ),
 		];
 	}
 
-	// -------------------------------------------------------------------------
-	// Settings page
-	// -------------------------------------------------------------------------
+	// ── Settings page ─────────────────────────────────────────────────────────
 
-	/**
-	 * Registers the plugin options page under "Configurações" in the admin menu.
-	 */
 	public static function add_settings_page(): void {
 		add_options_page(
 			__( 'AI Post Assistant – Configurações', 'ai-post-assistant' ),
@@ -117,14 +115,12 @@ final class AI_Post_Assistant {
 		);
 	}
 
-	/**
-	 * Registers settings, sections and fields via the Settings API.
-	 */
 	public static function register_settings(): void {
-		// ── Summarizer section ────────────────────────────────────────────────
+
+		// ── IA Resumo – Summarizer ─────────────────────────────────────────────
 		add_settings_section(
 			'ai_pa_summarizer_section',
-			__( 'Configurações do Resumo (Summarizer API)', 'ai-post-assistant' ),
+			__( 'IA Resumo – Summarizer API', 'ai-post-assistant' ),
 			static function (): void {
 				echo '<p>' . esc_html__(
 					'Define como a API Summarizer do Chrome gera o resumo base em inglês antes da tradução para português.',
@@ -134,90 +130,81 @@ final class AI_Post_Assistant {
 			'ai-post-assistant'
 		);
 
-		register_setting(
-			'ai_post_assistant',
-			self::OPT_SUMMARIZER_TYPE,
-			[
-				'type'              => 'string',
-				'sanitize_callback' => [ self::class, 'sanitize_summarizer_type' ],
-				'default'           => 'tldr',
-			]
-		);
+		register_setting( 'ai_post_assistant', self::OPT_SUMMARIZER_TYPE, [
+			'type'              => 'string',
+			'sanitize_callback' => [ self::class, 'sanitize_summarizer_type' ],
+			'default'           => 'tldr',
+		] );
+		add_settings_field( self::OPT_SUMMARIZER_TYPE, __( 'Tipo de resumo', 'ai-post-assistant' ),
+			[ self::class, 'render_summarizer_type_field' ], 'ai-post-assistant', 'ai_pa_summarizer_section' );
 
-		add_settings_field(
-			self::OPT_SUMMARIZER_TYPE,
-			__( 'Tipo de resumo', 'ai-post-assistant' ),
-			[ self::class, 'render_summarizer_type_field' ],
-			'ai-post-assistant',
-			'ai_pa_summarizer_section'
-		);
+		register_setting( 'ai_post_assistant', self::OPT_SUMMARIZER_FORMAT, [
+			'type'              => 'string',
+			'sanitize_callback' => [ self::class, 'sanitize_summarizer_format' ],
+			'default'           => 'plain-text',
+		] );
+		add_settings_field( self::OPT_SUMMARIZER_FORMAT, __( 'Formato de saída', 'ai-post-assistant' ),
+			[ self::class, 'render_summarizer_format_field' ], 'ai-post-assistant', 'ai_pa_summarizer_section' );
 
-		register_setting(
-			'ai_post_assistant',
-			self::OPT_SUMMARIZER_FORMAT,
-			[
-				'type'              => 'string',
-				'sanitize_callback' => [ self::class, 'sanitize_summarizer_format' ],
-				'default'           => 'plain-text',
-			]
-		);
+		register_setting( 'ai_post_assistant', self::OPT_SUMMARIZER_LENGTH, [
+			'type'              => 'string',
+			'sanitize_callback' => [ self::class, 'sanitize_summarizer_length' ],
+			'default'           => 'short',
+		] );
+		add_settings_field( self::OPT_SUMMARIZER_LENGTH, __( 'Comprimento do resumo', 'ai-post-assistant' ),
+			[ self::class, 'render_summarizer_length_field' ], 'ai-post-assistant', 'ai_pa_summarizer_section' );
 
-		add_settings_field(
-			self::OPT_SUMMARIZER_FORMAT,
-			__( 'Formato de saída', 'ai-post-assistant' ),
-			[ self::class, 'render_summarizer_format_field' ],
-			'ai-post-assistant',
-			'ai_pa_summarizer_section'
-		);
-
-		register_setting(
-			'ai_post_assistant',
-			self::OPT_SUMMARIZER_LENGTH,
-			[
-				'type'              => 'string',
-				'sanitize_callback' => [ self::class, 'sanitize_summarizer_length' ],
-				'default'           => 'short',
-			]
-		);
-
-		add_settings_field(
-			self::OPT_SUMMARIZER_LENGTH,
-			__( 'Comprimento do resumo', 'ai-post-assistant' ),
-			[ self::class, 'render_summarizer_length_field' ],
-			'ai-post-assistant',
-			'ai_pa_summarizer_section'
-		);
-
-		// ── Títulos section ───────────────────────────────────────────────────
+		// ── IA Títulos – LanguageModel prompt ─────────────────────────────────
 		add_settings_section(
 			'ai_pa_titles_section',
-			__( 'Configurações do Prompt de Títulos (LanguageModel API)', 'ai-post-assistant' ),
+			__( 'IA Títulos – Prompt (LanguageModel API)', 'ai-post-assistant' ),
 			static function (): void {
 				echo '<p>' . esc_html__(
-					'Edite o prompt enviado ao modelo de linguagem para gerar sugestões de título. Use {{context}} como marcador do texto do artigo.',
+					'Edite o prompt enviado ao modelo de linguagem. Use {{context}} como marcador do texto do artigo (máx. 4 000 caracteres).',
 					'ai-post-assistant'
 				) . '</p>';
 			},
 			'ai-post-assistant'
 		);
 
-		register_setting(
-			'ai_post_assistant',
-			self::OPT_SEO_PROMPT,
-			[
-				'type'              => 'string',
-				'sanitize_callback' => 'sanitize_textarea_field',
-				'default'           => self::DEFAULT_SEO_PROMPT,
-			]
+		register_setting( 'ai_post_assistant', self::OPT_SEO_PROMPT, [
+			'type'              => 'string',
+			'sanitize_callback' => 'sanitize_textarea_field',
+			'default'           => self::DEFAULT_SEO_PROMPT,
+		] );
+		add_settings_field( self::OPT_SEO_PROMPT, __( 'Prompt SEO', 'ai-post-assistant' ),
+			[ self::class, 'render_seo_prompt_field' ], 'ai-post-assistant', 'ai_pa_titles_section' );
+
+		// ── IA Links ──────────────────────────────────────────────────────────
+		add_settings_section(
+			'ai_pa_links_section',
+			__( 'IA Links – Inserção automática de links', 'ai-post-assistant' ),
+			static function (): void {
+				echo '<p>' . esc_html__(
+					'Configura o comportamento do botão IA Links no editor. A lista de palavras-chave é editável como JSON; deixe o campo vazio para usar a lista padrão do plugin.',
+					'ai-post-assistant'
+				) . '</p>';
+			},
+			'ai-post-assistant'
 		);
 
-		add_settings_field(
-			self::OPT_SEO_PROMPT,
-			__( 'Prompt SEO', 'ai-post-assistant' ),
-			[ self::class, 'render_seo_prompt_field' ],
-			'ai-post-assistant',
-			'ai_pa_titles_section'
-		);
+		register_setting( 'ai_post_assistant', self::OPT_LINK_MAX_PER_KEYWORD, [
+			'type'              => 'integer',
+			'sanitize_callback' => [ self::class, 'sanitize_link_max' ],
+			'default'           => 2,
+		] );
+		add_settings_field( self::OPT_LINK_MAX_PER_KEYWORD,
+			__( 'Máximo de links por palavra-chave', 'ai-post-assistant' ),
+			[ self::class, 'render_link_max_field' ], 'ai-post-assistant', 'ai_pa_links_section' );
+
+		register_setting( 'ai_post_assistant', self::OPT_LINK_MAP, [
+			'type'              => 'string',
+			'sanitize_callback' => [ self::class, 'sanitize_link_map' ],
+			'default'           => '',
+		] );
+		add_settings_field( self::OPT_LINK_MAP,
+			__( 'Lista de links (JSON)', 'ai-post-assistant' ),
+			[ self::class, 'render_link_map_field' ], 'ai-post-assistant', 'ai_pa_links_section' );
 	}
 
 	// ── Field renderers ───────────────────────────────────────────────────────
@@ -254,15 +241,36 @@ final class AI_Post_Assistant {
 	public static function render_seo_prompt_field(): void {
 		$value = (string) get_option( self::OPT_SEO_PROMPT, self::DEFAULT_SEO_PROMPT );
 		printf(
-			'<textarea name="%s" id="%s" rows="8" cols="80" class="large-text code">%s</textarea>
-			 <p class="description">%s</p>',
-			esc_attr( self::OPT_SEO_PROMPT ),
+			'<textarea name="%1$s" id="%1$s" rows="8" cols="80" class="large-text code">%2$s</textarea>
+			 <p class="description">%3$s</p>',
 			esc_attr( self::OPT_SEO_PROMPT ),
 			esc_textarea( $value ),
-			esc_html__(
-				'Use {{context}} onde o texto do artigo deve ser inserido. O modelo receberá no máximo 4 000 caracteres.',
-				'ai-post-assistant'
-			)
+			esc_html__( 'Use {{context}} onde o texto do artigo será inserido.', 'ai-post-assistant' )
+		);
+	}
+
+	public static function render_link_max_field(): void {
+		$value = max( 1, (int) get_option( self::OPT_LINK_MAX_PER_KEYWORD, 2 ) );
+		printf(
+			'<input type="number" name="%1$s" id="%1$s" value="%2$d" min="1" max="10" class="small-text" />
+			 <p class="description">%3$s</p>',
+			esc_attr( self::OPT_LINK_MAX_PER_KEYWORD ),
+			$value,
+			esc_html__( 'Número máximo de vezes que a mesma palavra-chave pode ser linkada em um artigo (padrão: 2).', 'ai-post-assistant' )
+		);
+	}
+
+	public static function render_link_map_field(): void {
+		$value = (string) get_option( self::OPT_LINK_MAP, '' );
+		$placeholder = '[ { "url": "https://lance.com.br/flamengo", "keywords": ["Flamengo"] }, ... ]';
+		printf(
+			'<textarea name="%1$s" id="%1$s" rows="16" cols="80" class="large-text code" placeholder="%2$s">%3$s</textarea>
+			 <p class="description">%4$s<br>%5$s</p>',
+			esc_attr( self::OPT_LINK_MAP ),
+			esc_attr( $placeholder ),
+			esc_textarea( $value ),
+			esc_html__( 'Array JSON com objetos { "url": "...", "keywords": ["...", "..."] }. Cada keyword é um texto a buscar no artigo (case-insensitive).', 'ai-post-assistant' ),
+			esc_html__( 'Deixe vazio para usar a lista padrão do plugin.', 'ai-post-assistant' )
 		);
 	}
 
@@ -281,6 +289,54 @@ final class AI_Post_Assistant {
 	public static function sanitize_summarizer_length( mixed $value ): string {
 		$allowed = [ 'short', 'medium', 'long' ];
 		return in_array( $value, $allowed, true ) ? (string) $value : 'short';
+	}
+
+	public static function sanitize_link_max( mixed $value ): int {
+		$int = (int) $value;
+		return ( $int >= 1 && $int <= 10 ) ? $int : 2;
+	}
+
+	/**
+	 * Validates that the submitted value is either empty or a valid JSON array
+	 * of objects with "url" (string) and "keywords" (array of strings).
+	 * Returns empty string on any validation failure to preserve the last
+	 * known-good value shown to the user via settings_errors().
+	 */
+	public static function sanitize_link_map( mixed $value ): string {
+		$raw = sanitize_textarea_field( (string) $value );
+
+		if ( '' === trim( $raw ) ) {
+			return '';
+		}
+
+		$decoded = json_decode( $raw, true );
+
+		if ( ! is_array( $decoded ) || empty( $decoded ) ) {
+			add_settings_error(
+				self::OPT_LINK_MAP,
+				'invalid_json',
+				__( 'Lista de links: JSON inválido. Verifique a sintaxe e tente novamente.', 'ai-post-assistant' )
+			);
+			return get_option( self::OPT_LINK_MAP, '' );
+		}
+
+		foreach ( $decoded as $entry ) {
+			if (
+				! is_array( $entry ) ||
+				empty( $entry['url'] ) || ! is_string( $entry['url'] ) ||
+				empty( $entry['keywords'] ) || ! is_array( $entry['keywords'] )
+			) {
+				add_settings_error(
+					self::OPT_LINK_MAP,
+					'invalid_structure',
+					__( 'Lista de links: cada entrada deve ter "url" (string) e "keywords" (array).', 'ai-post-assistant' )
+				);
+				return get_option( self::OPT_LINK_MAP, '' );
+			}
+		}
+
+		// Re-encode to normalise whitespace stored in the DB.
+		return (string) wp_json_encode( $decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 	}
 
 	// ── Page renderer ─────────────────────────────────────────────────────────
@@ -305,13 +361,6 @@ final class AI_Post_Assistant {
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
 
-	/**
-	 * Renders an HTML <select> element for a settings field.
-	 *
-	 * @param string              $name    The option/field name (also used as id).
-	 * @param array<string,string> $options Map of value => label.
-	 * @param string              $current Currently saved value.
-	 */
 	private static function render_select( string $name, array $options, string $current ): void {
 		printf( '<select name="%s" id="%s">', esc_attr( $name ), esc_attr( $name ) );
 		foreach ( $options as $value => $label ) {
@@ -325,15 +374,8 @@ final class AI_Post_Assistant {
 		echo '</select>';
 	}
 
-	// ── Screen guard ─────────────────────────────────────────────────────────
+	// ── Screen guard ──────────────────────────────────────────────────────────
 
-	/**
-	 * Returns true only when ALL conditions are satisfied:
-	 *  1. The current user has the `edit_posts` capability.
-	 *  2. get_current_screen() returns a WP_Screen instance.
-	 *  3. The screen is the block editor (`is_block_editor() === true`).
-	 *  4. The screen base is 'post' (not 'edit', 'options', etc.).
-	 */
 	public static function is_valid_edit_screen(): bool {
 		if ( ! current_user_can( 'edit_posts' ) ) {
 			return false;
