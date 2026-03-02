@@ -10,6 +10,8 @@
     "test:php": "./vendor/bin/phpunit"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/react": "^16.0.0",
     "@wordpress/scripts": "^30.0.0"
   }
 }
