@@ -202,6 +202,9 @@ class AiPostAssistantTest extends TestCase {
 		Functions\when( 'wp_create_nonce' )->justReturn( 'test_nonce_abc123' );
 		Functions\when( 'admin_url' )->justReturn( 'https://example.com/wp-admin/admin-ajax.php' );
 		Functions\when( 'esc_url' )->returnArg();
+		// get_option() is called by get_settings() for every plugin option.
+		// We don't assert on the settings values here, so null is an acceptable stub.
+		Functions\when( 'get_option' )->justReturn( null );
 
 		Functions\expect( 'wp_enqueue_script' )
 			->once()

@@ -191,6 +191,7 @@ final class AI_Post_Assistant {
 			'ai_pa_summarizer_section',
 			__( 'IA Resumo – Summarizer API', 'ai-post-assistant' ),
 			static function (): void {
+				echo '<span class="ai-pa-ctrl" data-by="' . esc_attr( self::OPT_ENABLE_RESUMO ) . '"></span>';
 				echo '<p>' . esc_html__(
 					'Define como a API Summarizer do Chrome gera o resumo base em inglês antes da tradução para português.',
 					'ai-post-assistant'
@@ -228,6 +229,7 @@ final class AI_Post_Assistant {
 			'ai_pa_titles_section',
 			__( 'IA Títulos – Prompt (LanguageModel API)', 'ai-post-assistant' ),
 			static function (): void {
+				echo '<span class="ai-pa-ctrl" data-by="' . esc_attr( self::OPT_ENABLE_TITLES ) . '"></span>';
 				echo '<p>' . esc_html__(
 					'Edite o prompt enviado ao modelo de linguagem. Use {{context}} como marcador do texto do artigo (máx. 4 000 caracteres).',
 					'ai-post-assistant'
@@ -249,6 +251,7 @@ final class AI_Post_Assistant {
 			'ai_pa_tags_section',
 			__( 'IA Tags – Prompt (LanguageModel API)', 'ai-post-assistant' ),
 			static function (): void {
+				echo '<span class="ai-pa-ctrl" data-by="' . esc_attr( self::OPT_ENABLE_TAGS ) . '"></span>';
 				echo '<p>' . esc_html__(
 					'Edite o prompt enviado ao modelo de linguagem para geração de tags. Use {{context}} como marcador do texto do artigo (máx. 3 000 caracteres).',
 					'ai-post-assistant'
@@ -270,6 +273,7 @@ final class AI_Post_Assistant {
 			'ai_pa_links_section',
 			__( 'IA Links – Inserção automática de links', 'ai-post-assistant' ),
 			static function (): void {
+				echo '<span class="ai-pa-ctrl" data-by="' . esc_attr( self::OPT_ENABLE_LINKS ) . '"></span>';
 				echo '<p>' . esc_html__(
 					'Configura o comportamento do botão IA Links no editor. A lista de palavras-chave é editável como JSON; deixe o campo vazio para usar a lista padrão do plugin.',
 					'ai-post-assistant'
@@ -662,16 +666,74 @@ final class AI_Post_Assistant {
 			</form>
 		</div>
 		<script>
-		document.querySelectorAll( '.ai-pa-toggle input[type="checkbox"]' ).forEach( function ( cb ) {
-			var label = cb.closest( '.ai-pa-toggle' ).querySelector( '.ai-pa-toggle__label' );
-			cb.addEventListener( 'change', function () {
-				if ( label ) {
-					label.textContent = cb.checked
-						? '<?php echo esc_js( __( 'Ativado', 'ai-post-assistant' ) ); ?>'
-						: '<?php echo esc_js( __( 'Desativado', 'ai-post-assistant' ) ); ?>';
-				}
+		( function () {
+			// ── Toggle label update (Ativado / Desativado) ────────────────────
+			document.querySelectorAll( '.ai-pa-toggle input[type="checkbox"]' ).forEach( function ( cb ) {
+				var label = cb.closest( '.ai-pa-toggle' ).querySelector( '.ai-pa-toggle__label' );
+				cb.addEventListener( 'change', function () {
+					if ( label ) {
+						label.textContent = cb.checked
+							? '<?php echo esc_js( __( 'Ativado', 'ai-post-assistant' ) ); ?>'
+							: '<?php echo esc_js( __( 'Desativado', 'ai-post-assistant' ) ); ?>';
+					}
+				} );
 			} );
-		} );
+
+			// ── Section visibility: hide dependent sections when feature is off ──
+			//
+			// Each dependent section outputs a <span class="ai-pa-ctrl" data-by="OPTION_KEY">
+			// as the first element of its section callback.  WordPress renders sections as
+			// flat siblings (H2 → callback output → table), so we traverse siblings to collect
+			// the full section group and toggle display together.
+			document.querySelectorAll( '.ai-pa-ctrl' ).forEach( function ( marker ) {
+				var optKey  = marker.getAttribute( 'data-by' );
+				var toggle  = document.getElementById( optKey );
+				if ( ! toggle ) return;
+
+				var els = [];
+
+				// Find the H2 that WordPress rendered just before the section callback.
+				var prev = marker.previousElementSibling;
+				while ( prev ) {
+					if ( prev.tagName === 'H2' ) { els.push( prev ); break; }
+					prev = prev.previousElementSibling;
+				}
+
+				// Collect the marker itself and every following sibling until the
+				// next H2 or the form's submit row — those belong to the next section.
+				var next = marker;
+				while ( next ) {
+					if ( next !== marker && ( next.tagName === 'H2' || next.classList.contains( 'submit' ) ) ) break;
+					els.push( next );
+					next = next.nextElementSibling;
+				}
+
+				function setVisible( show ) {
+					els.forEach( function ( el ) { el.style.display = show ? '' : 'none'; } );
+				}
+
+				setVisible( toggle.checked );
+				toggle.addEventListener( 'change', function () { setVisible( toggle.checked ); } );
+			} );
+
+			// ── OpenAI fallback: hide API-key + model rows when toggle is off ──
+			var openaiToggle = document.getElementById( '<?php echo esc_js( self::OPT_ENABLE_OPENAI_FALLBACK ); ?>' );
+			if ( openaiToggle ) {
+				var keyInput   = document.getElementById( '<?php echo esc_js( self::OPT_OPENAI_API_KEY ); ?>' );
+				var modelInput = document.getElementById( '<?php echo esc_js( self::OPT_OPENAI_MODEL ); ?>' );
+				var openaiRows = [ keyInput, modelInput ]
+					.filter( Boolean )
+					.map( function ( el ) { return el.closest( 'tr' ); } )
+					.filter( Boolean );
+
+				function setOpenaiVisible( show ) {
+					openaiRows.forEach( function ( row ) { row.style.display = show ? '' : 'none'; } );
+				}
+
+				setOpenaiVisible( openaiToggle.checked );
+				openaiToggle.addEventListener( 'change', function () { setOpenaiVisible( openaiToggle.checked ); } );
+			}
+		}() );
 		</script>
 		<?php
 	}

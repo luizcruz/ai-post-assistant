@@ -2,10 +2,14 @@
  * Plugin entry point.
  *
  * Registers a single PluginDocumentSettingPanel ("✨ AI Post Assistant")
- * that hosts all three AI actions in one consolidated sidebar panel:
+ * that hosts all four AI actions in one consolidated sidebar panel:
  *   - IA Títulos  – generates SEO title suggestions
  *   - IA Resumo   – generates excerpt suggestions
  *   - IA Links    – inserts keyword links directly into the editor body
+ *   - IA Tags     – extracts tags and inserts them into the Tags sidebar field
+ *
+ * Each action button is shown only when its feature toggle is enabled in
+ * Configurações → AI Post Assistant.
  */
 import { registerPlugin }             from '@wordpress/plugins';
 import { PluginDocumentSettingPanel } from '@wordpress/editor';
