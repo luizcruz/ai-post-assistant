@@ -56,6 +56,9 @@ export async function fetchAIResponse( promptType, contextText, onProgress = nul
 	if ( promptType === 'excerpt' ) {
 		return fetchExcerptSuggestion( contextText, onProgress );
 	}
+	if ( promptType === 'tags' ) {
+		return fetchTagSuggestions( contextText );
+	}
 	throw new Error( `Tipo de prompt desconhecido: ${ promptType }` );
 }
 
@@ -155,6 +158,52 @@ async function fetchExcerptSuggestion( contextText, onProgress ) {
 	const summaryPt = await translator.translate( summaryEn );
 
 	return [ summaryPt ];
+}
+
+// -----------------------------------------------------------------------------
+// Tags pipeline – text mining via LanguageModel
+// -----------------------------------------------------------------------------
+
+/**
+ * Uses Chrome's LanguageModel API to extract 3 relevant tag suggestions
+ * from the post content via text mining.
+ *
+ * The model is instructed to identify the most meaningful terms present
+ * in the article (teams, competitions, athletes, sports concepts) and
+ * return them as short tag names ready for WordPress taxonomy.
+ *
+ * @param { string } contextText
+ * @returns { Promise<string[]> }  Up to 3 tag name strings.
+ */
+async function fetchTagSuggestions( contextText ) {
+	const session = await LanguageModel.create();
+
+	const prompt = `
+Analise o texto abaixo e identifique as 3 palavras-chave ou expressões mais relevantes para usar como tags de classificação em um portal esportivo.
+Prefira nomes de times, competições, atletas ou termos esportivos diretamente mencionados no texto.
+As tags devem ser curtas (1 a 3 palavras), em português, sem numeração, aspas ou texto extra.
+Retorne exatamente 3 tags, uma por linha.
+
+Texto:
+${ contextText.substring( 0, 3000 ) }
+	`;
+
+	const response = await session.prompt( [
+		{ role: 'user', content: [ { type: 'text', value: prompt } ] },
+	] );
+
+	const responseText = typeof response === 'string' ? response : String( response );
+
+	return responseText
+		.split( '\n' )
+		.map( ( line ) =>
+			line
+				.replace( /^[\d.\-*]\s*/, '' )  // strip leading "1. " / "- " / "* "
+				.replace( /["']/g, '' )          // strip quotes
+				.trim()
+		)
+		.filter( ( line ) => line.length > 0 )
+		.slice( 0, 3 );
 }
 
 // =============================================================================

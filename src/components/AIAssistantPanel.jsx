@@ -3,6 +3,7 @@ import { Button }                from '@wordpress/components';
 import { useDispatch, useSelect } from '@wordpress/data';
 import { __ }                    from '@wordpress/i18n';
 import SelectionModal            from './SelectionModal';
+import TagsModal                 from './TagsModal';
 import { injectLinksIntoBlocks } from '../utils/linkInjector';
 import { getActiveLinkMap }      from '../utils/linkKeywords';
 
@@ -24,9 +25,11 @@ export default function AIAssistantPanel() {
 	const enableTitles = settings.enableTitles !== false;
 	const enableResumo = settings.enableResumo !== false;
 	const enableLinks  = settings.enableLinks  !== false;
+	const enableTags   = settings.enableTags   !== false;
 
 	// null = no modal open; 'title' | 'excerpt' = modal type open
-	const [ openModal, setOpenModal ] = useState( null );
+	const [ openModal, setOpenModal ]   = useState( null );
+	const [ tagsOpen, setTagsOpen ]     = useState( false );
 
 	// IA Links feedback state
 	const [ linksStatus, setLinksStatus ] = useState( '' ); // '' | 'done' | 'none'
@@ -69,7 +72,7 @@ export default function AIAssistantPanel() {
 	// Render
 	// ------------------------------------------------------------------
 
-	const noneActive = ! enableTitles && ! enableResumo && ! enableLinks;
+	const noneActive = ! enableTitles && ! enableResumo && ! enableLinks && ! enableTags;
 
 	const btnStyle = { width: '100%', justifyContent: 'center' };
 
@@ -114,6 +117,19 @@ export default function AIAssistantPanel() {
 							style={ btnStyle }
 						>
 							{ __( '✨ IA Links', 'ai-post-assistant' ) }
+						</Button>
+					) }
+
+					{ enableTags && (
+						<Button
+							variant="primary"
+							onClick={ () => {
+								setLinksStatus( '' );
+								setTagsOpen( true );
+							} }
+							style={ btnStyle }
+						>
+							{ __( '✨ IA Tags', 'ai-post-assistant' ) }
 						</Button>
 					) }
 				</div>

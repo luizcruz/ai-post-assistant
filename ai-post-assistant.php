@@ -28,6 +28,7 @@ final class AI_Post_Assistant {
 	private const OPT_ENABLE_TITLES          = 'ai_pa_enable_titles';
 	private const OPT_ENABLE_RESUMO          = 'ai_pa_enable_resumo';
 	private const OPT_ENABLE_LINKS           = 'ai_pa_enable_links';
+	private const OPT_ENABLE_TAGS            = 'ai_pa_enable_tags';
 	// Summarizer (IA Resumo)
 	private const OPT_SUMMARIZER_TYPE        = 'ai_pa_summarizer_type';
 	private const OPT_SUMMARIZER_FORMAT      = 'ai_pa_summarizer_format';
@@ -101,7 +102,8 @@ final class AI_Post_Assistant {
 			// Feature toggles – true = active, false = hidden in the editor
 			'enableTitles'      => '1' === get_option( self::OPT_ENABLE_TITLES, '1' ),
 			'enableResumo'      => '1' === get_option( self::OPT_ENABLE_RESUMO, '1' ),
-			'enableLinks'       => '1' === get_option( self::OPT_ENABLE_LINKS, '1' ),
+			'enableLinks'       => '1' === get_option( self::OPT_ENABLE_LINKS,  '1' ),
+			'enableTags'        => '1' === get_option( self::OPT_ENABLE_TAGS,   '1' ),
 			// Summarizer (IA Resumo)
 			'summarizerType'    => (string) get_option( self::OPT_SUMMARIZER_TYPE, 'tldr' ),
 			'summarizerFormat'  => (string) get_option( self::OPT_SUMMARIZER_FORMAT, 'plain-text' ),
@@ -145,6 +147,7 @@ final class AI_Post_Assistant {
 			self::OPT_ENABLE_TITLES => '✨ IA Títulos',
 			self::OPT_ENABLE_RESUMO => '✨ IA Resumo',
 			self::OPT_ENABLE_LINKS  => '✨ IA Links',
+			self::OPT_ENABLE_TAGS   => '✨ IA Tags',
 		] as $option => $label ) {
 			register_setting( 'ai_post_assistant', $option, [
 				'type'              => 'string',
