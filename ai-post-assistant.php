@@ -35,9 +35,16 @@ final class AI_Post_Assistant {
 	private const OPT_SUMMARIZER_LENGTH      = 'ai_pa_summarizer_length';
 	// LanguageModel prompt (IA Títulos)
 	private const OPT_SEO_PROMPT             = 'ai_pa_seo_prompt';
+	// LanguageModel prompt (IA Tags)
+	private const OPT_TAGS_PROMPT            = 'ai_pa_tags_prompt';
 	// Link injector (IA Links)
 	private const OPT_LINK_MAX_PER_KEYWORD   = 'ai_pa_link_max_per_keyword';
 	private const OPT_LINK_MAP               = 'ai_pa_link_map';
+	// OpenAI fallback
+	private const OPT_ENABLE_OPENAI_FALLBACK = 'ai_pa_enable_openai_fallback';
+	private const OPT_OPENAI_API_KEY         = 'ai_pa_openai_api_key';
+	private const OPT_OPENAI_MODEL           = 'ai_pa_openai_model';
+	private const AJAX_ACTION                = 'ai_pa_openai';
 
 	/**
 	 * Default SEO prompt sent to Chrome's LanguageModel API.
@@ -49,10 +56,19 @@ final class AI_Post_Assistant {
 		"Retorne apenas os títulos, um por linha, sem numeração, aspas ou texto extra.\n\n" .
 		"Contexto do texto:\n{{context}}";
 
+	/**
+	 * Default tags prompt sent to Chrome's LanguageModel API.
+	 * Use {{context}} as the placeholder for the article text.
+	 */
+	private const DEFAULT_TAGS_PROMPT =
+		"Act as a semantic extractor. Identify the document's main vector theme, then find 5 phrases from within the text that have the highest similarity to that theme. Format: tag1, tag2, tag3....\n\n" .
+		"Text:\n{{context}}";
+
 	public static function init(): void {
 		add_action( 'enqueue_block_editor_assets', [ self::class, 'enqueue_editor_assets' ] );
 		add_action( 'admin_menu', [ self::class, 'add_settings_page' ] );
 		add_action( 'admin_init', [ self::class, 'register_settings' ] );
+		add_action( 'wp_ajax_' . self::AJAX_ACTION, [ self::class, 'handle_openai_request' ] );
 	}
 
 	/**
@@ -110,9 +126,14 @@ final class AI_Post_Assistant {
 			'summarizerLength'  => (string) get_option( self::OPT_SUMMARIZER_LENGTH, 'short' ),
 			// LanguageModel prompt (IA Títulos)
 			'seoPrompt'         => (string) get_option( self::OPT_SEO_PROMPT, self::DEFAULT_SEO_PROMPT ),
+			// LanguageModel prompt (IA Tags)
+			'tagsPrompt'        => (string) get_option( self::OPT_TAGS_PROMPT, self::DEFAULT_TAGS_PROMPT ),
 			// Link injector (IA Links)
-			'linkMaxPerKeyword' => max( 1, (int) get_option( self::OPT_LINK_MAX_PER_KEYWORD, 2 ) ),
-			'linkMap'           => (string) get_option( self::OPT_LINK_MAP, '' ),
+			'linkMaxPerKeyword'    => max( 1, (int) get_option( self::OPT_LINK_MAX_PER_KEYWORD, 2 ) ),
+			'linkMap'              => (string) get_option( self::OPT_LINK_MAP, '' ),
+			// OpenAI fallback – API key is intentionally NOT exposed to the browser
+			'enableOpenAIFallback' => '1' === get_option( self::OPT_ENABLE_OPENAI_FALLBACK, '0' ),
+			'openAIModel'          => (string) get_option( self::OPT_OPENAI_MODEL, 'gpt-4o-mini' ),
 		];
 	}
 
@@ -223,6 +244,27 @@ final class AI_Post_Assistant {
 		add_settings_field( self::OPT_SEO_PROMPT, __( 'Prompt SEO', 'ai-post-assistant' ),
 			[ self::class, 'render_seo_prompt_field' ], 'ai-post-assistant', 'ai_pa_titles_section' );
 
+		// ── IA Tags – LanguageModel prompt ────────────────────────────────────
+		add_settings_section(
+			'ai_pa_tags_section',
+			__( 'IA Tags – Prompt (LanguageModel API)', 'ai-post-assistant' ),
+			static function (): void {
+				echo '<p>' . esc_html__(
+					'Edite o prompt enviado ao modelo de linguagem para geração de tags. Use {{context}} como marcador do texto do artigo (máx. 3 000 caracteres).',
+					'ai-post-assistant'
+				) . '</p>';
+			},
+			'ai-post-assistant'
+		);
+
+		register_setting( 'ai_post_assistant', self::OPT_TAGS_PROMPT, [
+			'type'              => 'string',
+			'sanitize_callback' => 'sanitize_textarea_field',
+			'default'           => self::DEFAULT_TAGS_PROMPT,
+		] );
+		add_settings_field( self::OPT_TAGS_PROMPT, __( 'Prompt Tags', 'ai-post-assistant' ),
+			[ self::class, 'render_tags_prompt_field' ], 'ai-post-assistant', 'ai_pa_tags_section' );
+
 		// ── IA Links ──────────────────────────────────────────────────────────
 		add_settings_section(
 			'ai_pa_links_section',
@@ -253,6 +295,52 @@ final class AI_Post_Assistant {
 		add_settings_field( self::OPT_LINK_MAP,
 			__( 'Lista de links (JSON)', 'ai-post-assistant' ),
 			[ self::class, 'render_link_map_field' ], 'ai-post-assistant', 'ai_pa_links_section' );
+
+		// ── OpenAI fallback ────────────────────────────────────────────────────
+		add_settings_section(
+			'ai_pa_openai_section',
+			__( 'Fallback OpenAI – quando os modelos do Chrome não estiverem disponíveis', 'ai-post-assistant' ),
+			static function (): void {
+				echo '<p>' . esc_html__(
+					'Quando ativado, o plugin tenta usar a API da OpenAI caso as APIs on-device do Chrome (LanguageModel / Summarizer / Translator) não estejam disponíveis ou falhem. A chave de API é armazenada no servidor e nunca é enviada ao navegador.',
+					'ai-post-assistant'
+				) . '</p>';
+			},
+			'ai-post-assistant'
+		);
+
+		register_setting( 'ai_post_assistant', self::OPT_ENABLE_OPENAI_FALLBACK, [
+			'type'              => 'string',
+			'sanitize_callback' => static fn( $v ) => '1' === (string) $v ? '1' : '0',
+			'default'           => '0',
+		] );
+		add_settings_field(
+			self::OPT_ENABLE_OPENAI_FALLBACK,
+			__( '✨ Fallback OpenAI', 'ai-post-assistant' ),
+			static function (): void {
+				AI_Post_Assistant::render_toggle_field( self::OPT_ENABLE_OPENAI_FALLBACK, 'Fallback OpenAI' );
+			},
+			'ai-post-assistant',
+			'ai_pa_openai_section'
+		);
+
+		register_setting( 'ai_post_assistant', self::OPT_OPENAI_API_KEY, [
+			'type'              => 'string',
+			'sanitize_callback' => [ self::class, 'sanitize_openai_api_key' ],
+			'default'           => '',
+		] );
+		add_settings_field( self::OPT_OPENAI_API_KEY,
+			__( 'Chave de API (OpenAI)', 'ai-post-assistant' ),
+			[ self::class, 'render_openai_api_key_field' ], 'ai-post-assistant', 'ai_pa_openai_section' );
+
+		register_setting( 'ai_post_assistant', self::OPT_OPENAI_MODEL, [
+			'type'              => 'string',
+			'sanitize_callback' => [ self::class, 'sanitize_openai_model' ],
+			'default'           => 'gpt-4o-mini',
+		] );
+		add_settings_field( self::OPT_OPENAI_MODEL,
+			__( 'Modelo OpenAI', 'ai-post-assistant' ),
+			[ self::class, 'render_openai_model_field' ], 'ai-post-assistant', 'ai_pa_openai_section' );
 	}
 
 	// ── Field renderers ───────────────────────────────────────────────────────
@@ -319,6 +407,17 @@ final class AI_Post_Assistant {
 		);
 	}
 
+	public static function render_tags_prompt_field(): void {
+		$value = (string) get_option( self::OPT_TAGS_PROMPT, self::DEFAULT_TAGS_PROMPT );
+		printf(
+			'<textarea name="%1$s" id="%1$s" rows="6" cols="80" class="large-text code">%2$s</textarea>
+			 <p class="description">%3$s</p>',
+			esc_attr( self::OPT_TAGS_PROMPT ),
+			esc_textarea( $value ),
+			esc_html__( 'Use {{context}} onde o texto do artigo será inserido. O modelo deve retornar as tags separadas por vírgula.', 'ai-post-assistant' )
+		);
+	}
+
 	public static function render_link_max_field(): void {
 		$value = max( 1, (int) get_option( self::OPT_LINK_MAX_PER_KEYWORD, 2 ) );
 		printf(
@@ -342,6 +441,30 @@ final class AI_Post_Assistant {
 			esc_html__( 'Array JSON com objetos { "url": "...", "keywords": ["...", "..."] }. Cada keyword é um texto a buscar no artigo (case-insensitive).', 'ai-post-assistant' ),
 			esc_html__( 'Deixe vazio para usar a lista padrão do plugin.', 'ai-post-assistant' )
 		);
+	}
+
+	public static function render_openai_api_key_field(): void {
+		$has_key = '' !== (string) get_option( self::OPT_OPENAI_API_KEY, '' );
+		$placeholder = $has_key
+			? __( '(chave salva – deixe em branco para manter)', 'ai-post-assistant' )
+			: 'sk-...';
+		printf(
+			'<input type="password" name="%1$s" id="%1$s" value="" autocomplete="new-password" class="regular-text" placeholder="%2$s" />
+			 <p class="description">%3$s</p>',
+			esc_attr( self::OPT_OPENAI_API_KEY ),
+			esc_attr( $placeholder ),
+			esc_html__( 'Chave de API da OpenAI (começa com sk-). Armazenada no servidor, nunca enviada ao navegador.', 'ai-post-assistant' )
+		);
+	}
+
+	public static function render_openai_model_field(): void {
+		$value   = (string) get_option( self::OPT_OPENAI_MODEL, 'gpt-4o-mini' );
+		$options = [
+			'gpt-4o-mini' => 'GPT-4o Mini – rápido e econômico (recomendado)',
+			'gpt-4o'      => 'GPT-4o – melhor qualidade',
+			'gpt-3.5-turbo' => 'GPT-3.5 Turbo – legado',
+		];
+		self::render_select( self::OPT_OPENAI_MODEL, $options, $value );
 	}
 
 	// ── Sanitizers ────────────────────────────────────────────────────────────
@@ -409,6 +532,101 @@ final class AI_Post_Assistant {
 		return (string) wp_json_encode( $decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 	}
 
+	/**
+	 * Preserves the existing key when the submitted field is empty (password
+	 * field left blank on save). Validates that a new key starts with "sk-".
+	 */
+	public static function sanitize_openai_api_key( mixed $value ): string {
+		$trimmed = trim( (string) $value );
+
+		if ( '' === $trimmed ) {
+			return (string) get_option( self::OPT_OPENAI_API_KEY, '' );
+		}
+
+		if ( ! str_starts_with( $trimmed, 'sk-' ) ) {
+			add_settings_error(
+				self::OPT_OPENAI_API_KEY,
+				'invalid_key',
+				__( 'Chave da OpenAI inválida. Deve começar com "sk-".', 'ai-post-assistant' )
+			);
+			return (string) get_option( self::OPT_OPENAI_API_KEY, '' );
+		}
+
+		return $trimmed;
+	}
+
+	public static function sanitize_openai_model( mixed $value ): string {
+		$allowed = [ 'gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo' ];
+		return in_array( $value, $allowed, true ) ? (string) $value : 'gpt-4o-mini';
+	}
+
+	// ── OpenAI AJAX handler ────────────────────────────────────────────────────
+
+	/**
+	 * WordPress AJAX handler: proxies a prompt to the OpenAI Chat Completions
+	 * API server-side so the API key is never exposed to the browser.
+	 *
+	 * Requires: logged-in user with edit_posts capability + valid nonce.
+	 */
+	public static function handle_openai_request(): void {
+		check_ajax_referer( self::NONCE_ACTION, 'nonce' );
+
+		if ( ! current_user_can( 'edit_posts' ) ) {
+			wp_send_json_error( __( 'Permissão negada.', 'ai-post-assistant' ), 403 );
+		}
+
+		if ( '1' !== get_option( self::OPT_ENABLE_OPENAI_FALLBACK, '0' ) ) {
+			wp_send_json_error( __( 'Fallback OpenAI não está ativado.', 'ai-post-assistant' ), 400 );
+		}
+
+		$api_key = (string) get_option( self::OPT_OPENAI_API_KEY, '' );
+		if ( '' === $api_key ) {
+			wp_send_json_error( __( 'Chave de API da OpenAI não configurada nas opções do plugin.', 'ai-post-assistant' ), 400 );
+		}
+
+		$prompt = sanitize_textarea_field( wp_unslash( $_POST['prompt'] ?? '' ) );
+		if ( '' === $prompt ) {
+			wp_send_json_error( __( 'Prompt vazio.', 'ai-post-assistant' ), 400 );
+		}
+
+		$model = self::sanitize_openai_model( get_option( self::OPT_OPENAI_MODEL, 'gpt-4o-mini' ) );
+
+		$api_response = wp_remote_post(
+			'https://api.openai.com/v1/chat/completions',
+			[
+				'headers' => [
+					'Authorization' => 'Bearer ' . $api_key,
+					'Content-Type'  => 'application/json',
+				],
+				'body'    => wp_json_encode( [
+					'model'    => $model,
+					'messages' => [
+						[ 'role' => 'user', 'content' => $prompt ],
+					],
+				] ),
+				'timeout' => 30,
+			]
+		);
+
+		if ( is_wp_error( $api_response ) ) {
+			wp_send_json_error( $api_response->get_error_message(), 502 );
+		}
+
+		$status = (int) wp_remote_retrieve_response_code( $api_response );
+		$body   = json_decode( wp_remote_retrieve_body( $api_response ), true );
+
+		if ( 200 !== $status ) {
+			$message = is_array( $body ) && isset( $body['error']['message'] )
+				? (string) $body['error']['message']
+				/* translators: %d = HTTP status code from OpenAI */
+				: sprintf( __( 'Erro da API OpenAI (HTTP %d).', 'ai-post-assistant' ), $status );
+			wp_send_json_error( $message, $status );
+		}
+
+		$text = (string) ( $body['choices'][0]['message']['content'] ?? '' );
+		wp_send_json_success( [ 'text' => $text ] );
+	}
+
 	// ── Page renderer ─────────────────────────────────────────────────────────
 
 	public static function render_settings_page(): void {
@@ -443,6 +661,18 @@ final class AI_Post_Assistant {
 				?>
 			</form>
 		</div>
+		<script>
+		document.querySelectorAll( '.ai-pa-toggle input[type="checkbox"]' ).forEach( function ( cb ) {
+			var label = cb.closest( '.ai-pa-toggle' ).querySelector( '.ai-pa-toggle__label' );
+			cb.addEventListener( 'change', function () {
+				if ( label ) {
+					label.textContent = cb.checked
+						? '<?php echo esc_js( __( 'Ativado', 'ai-post-assistant' ) ); ?>'
+						: '<?php echo esc_js( __( 'Desativado', 'ai-post-assistant' ) ); ?>';
+				}
+			} );
+		} );
+		</script>
 		<?php
 	}
 

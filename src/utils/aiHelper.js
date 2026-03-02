@@ -21,8 +21,59 @@ const DEFAULT_SEO_PROMPT =
 	'Retorne apenas os títulos, um por linha, sem numeração, aspas ou texto extra.\n\n' +
 	'Contexto do texto:\n{{context}}';
 
+const DEFAULT_TAGS_PROMPT =
+	"Act as a semantic extractor. Identify the document's main vector theme, then find 5 phrases from within the text that have the highest similarity to that theme. Format: tag1, tag2, tag3....\n\n" +
+	'Text:\n{{context}}';
+
+// Used only by the OpenAI fallback for the excerpt pipeline (Summarizer + Translator replaced).
+const DEFAULT_EXCERPT_FALLBACK_PROMPT =
+	'Escreva um resumo conciso em português deste artigo (máximo 150 palavras), adequado como descrição editorial.\n' +
+	'Retorne apenas o texto do resumo, sem títulos, marcadores ou qualquer texto extra.\n\n' +
+	'Artigo:\n{{context}}';
+
+// =============================================================================
+// callOpenAIFallback – WordPress AJAX proxy to OpenAI Chat Completions
+// =============================================================================
+
+/**
+ * Sends a prompt to the WordPress AJAX endpoint (admin-ajax.php), which
+ * forwards it to the OpenAI Chat Completions API server-side.
+ * The OpenAI API key is stored in WordPress options and never reaches the browser.
+ *
+ * @param { string } prompt  Full prompt text (system + context already embedded).
+ * @returns { Promise<string> }  Raw text content from the OpenAI response.
+ */
+async function callOpenAIFallback( prompt ) {
+	const { ajaxUrl, nonce } = window.aiPostAssistantData ?? {};
+
+	const body = new URLSearchParams( {
+		action: 'ai_pa_openai',
+		nonce:  nonce ?? '',
+		prompt,
+	} );
+
+	const res = await fetch( ajaxUrl, {
+		method:  'POST',
+		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		body,
+	} );
+
+	if ( ! res.ok ) {
+		throw new Error( `Erro HTTP ${ res.status } ao chamar o fallback OpenAI.` );
+	}
+
+	const data = await res.json();
+
+	if ( ! data.success ) {
+		throw new Error( data.data ?? 'Erro no fallback OpenAI.' );
+	}
+
+	return String( data.data?.text ?? '' );
+}
+
 // =============================================================================
 // fetchAIResponse – Chrome on-device AI (LanguageModel / Summarizer / Translator)
+//                   with OpenAI fallback when Chrome APIs are unavailable
 // =============================================================================
 
 /**
@@ -84,17 +135,29 @@ export async function fetchAIResponse( promptType, contextText, onProgress = nul
  * @returns { Promise<string[]> }  Up to 3 title strings.
  */
 async function fetchTitleSuggestions( contextText ) {
-	// Deliberately no { languageCode } option – see titulos.js line 26.
-	const session = await LanguageModel.create();
-
 	const promptTemplate = SETTINGS.seoPrompt || DEFAULT_SEO_PROMPT;
 	const seoPrompt = promptTemplate.replace( '{{context}}', contextText.substring( 0, 4000 ) );
 
-	const response = await session.prompt( [
-		{ role: 'user', content: [ { type: 'text', value: seoPrompt } ] },
-	] );
+	let responseText;
 
-	const responseText = typeof response === 'string' ? response : String( response );
+	// Try Chrome LanguageModel first; fall back to OpenAI if unavailable or failing.
+	// Deliberately no { languageCode } option – see titulos.js line 26.
+	if ( typeof LanguageModel !== 'undefined' ) {
+		try {
+			const session = await LanguageModel.create();
+			const response = await session.prompt( [
+				{ role: 'user', content: [ { type: 'text', value: seoPrompt } ] },
+			] );
+			responseText = typeof response === 'string' ? response : String( response );
+		} catch ( chromeErr ) {
+			if ( ! SETTINGS.enableOpenAIFallback ) throw chromeErr;
+			responseText = await callOpenAIFallback( seoPrompt );
+		}
+	} else if ( SETTINGS.enableOpenAIFallback ) {
+		responseText = await callOpenAIFallback( seoPrompt );
+	} else {
+		throw new Error( 'Chrome LanguageModel API não disponível. Ative o fallback OpenAI nas configurações do plugin.' );
+	}
 
 	return responseText
 		.split( '\n' )
@@ -133,31 +196,45 @@ async function fetchTitleSuggestions( contextText ) {
  * @returns { Promise<string[]> }
  */
 async function fetchExcerptSuggestion( contextText, onProgress ) {
-	const summarizer = await Summarizer.create( {
-		type:                   SETTINGS.summarizerType   || 'tldr',
-		format:                 SETTINGS.summarizerFormat || 'plain-text',
-		length:                 SETTINGS.summarizerLength || 'short',
-		expectedOutputLanguage: 'en',
-	} );
-
-	const summaryEn = await summarizer.summarize( contextText, {
-		context: 'This article is intended for a general audience.',
-	} );
-
-	const translator = await Translator.create( {
-		sourceLanguage: 'en',
-		targetLanguage: 'pt',
-		monitor( m ) {
-			m.addEventListener( 'downloadprogress', ( e ) => {
-				const percent = ( ( e.loaded / e.total ) * 100 ).toFixed( 0 );
-				onProgress?.( `Baixando pacote de tradução pela primeira vez (${ percent }%)…` );
+	// Try Chrome Summarizer + Translator first; fall back to OpenAI if unavailable.
+	if ( typeof Summarizer !== 'undefined' ) {
+		try {
+			const summarizer = await Summarizer.create( {
+				type:                   SETTINGS.summarizerType   || 'tldr',
+				format:                 SETTINGS.summarizerFormat || 'plain-text',
+				length:                 SETTINGS.summarizerLength || 'short',
+				expectedOutputLanguage: 'en',
 			} );
-		},
-	} );
 
-	const summaryPt = await translator.translate( summaryEn );
+			const summaryEn = await summarizer.summarize( contextText, {
+				context: 'This article is intended for a general audience.',
+			} );
 
-	return [ summaryPt ];
+			const translator = await Translator.create( {
+				sourceLanguage: 'en',
+				targetLanguage: 'pt',
+				monitor( m ) {
+					m.addEventListener( 'downloadprogress', ( e ) => {
+						const percent = ( ( e.loaded / e.total ) * 100 ).toFixed( 0 );
+						onProgress?.( `Baixando pacote de tradução pela primeira vez (${ percent }%)…` );
+					} );
+				},
+			} );
+
+			const summaryPt = await translator.translate( summaryEn );
+			return [ summaryPt ];
+		} catch ( chromeErr ) {
+			if ( ! SETTINGS.enableOpenAIFallback ) throw chromeErr;
+			// Fall through to OpenAI fallback below.
+		}
+	} else if ( ! SETTINGS.enableOpenAIFallback ) {
+		throw new Error( 'Chrome Summarizer API não disponível. Ative o fallback OpenAI nas configurações do plugin.' );
+	}
+
+	// OpenAI fallback: single prompt produces a Portuguese summary directly.
+	const prompt = DEFAULT_EXCERPT_FALLBACK_PROMPT.replace( '{{context}}', contextText.substring( 0, 4000 ) );
+	const text   = await callOpenAIFallback( prompt );
+	return [ text ];
 }
 
 // -----------------------------------------------------------------------------
@@ -176,34 +253,42 @@ async function fetchExcerptSuggestion( contextText, onProgress ) {
  * @returns { Promise<string[]> }  Up to 3 tag name strings.
  */
 async function fetchTagSuggestions( contextText ) {
-	const session = await LanguageModel.create();
+	const promptTemplate = SETTINGS.tagsPrompt || DEFAULT_TAGS_PROMPT;
+	const prompt = promptTemplate.replace( '{{context}}', contextText.substring( 0, 3000 ) );
 
-	const prompt = `
-Analise o texto abaixo e identifique as 3 palavras-chave ou expressões mais relevantes para usar como tags de classificação em um portal esportivo.
-Prefira nomes de times, competições, atletas ou termos esportivos diretamente mencionados no texto.
-As tags devem ser curtas (1 a 3 palavras), em português, sem numeração, aspas ou texto extra.
-Retorne exatamente 3 tags, uma por linha.
+	let responseText;
 
-Texto:
-${ contextText.substring( 0, 3000 ) }
-	`;
+	// Try Chrome LanguageModel first; fall back to OpenAI if unavailable or failing.
+	if ( typeof LanguageModel !== 'undefined' ) {
+		try {
+			const session = await LanguageModel.create();
+			const response = await session.prompt( [
+				{ role: 'user', content: [ { type: 'text', value: prompt } ] },
+			] );
+			responseText = typeof response === 'string' ? response : String( response );
+		} catch ( chromeErr ) {
+			if ( ! SETTINGS.enableOpenAIFallback ) throw chromeErr;
+			responseText = await callOpenAIFallback( prompt );
+		}
+	} else if ( SETTINGS.enableOpenAIFallback ) {
+		responseText = await callOpenAIFallback( prompt );
+	} else {
+		throw new Error( 'Chrome LanguageModel API não disponível. Ative o fallback OpenAI nas configurações do plugin.' );
+	}
 
-	const response = await session.prompt( [
-		{ role: 'user', content: [ { type: 'text', value: prompt } ] },
-	] );
-
-	const responseText = typeof response === 'string' ? response : String( response );
-
+	// The prompt requests comma-separated output; normalise newlines to commas
+	// so the parser works even if the model adds line breaks between items.
 	return responseText
-		.split( '\n' )
-		.map( ( line ) =>
-			line
+		.replace( /\n/g, ',' )
+		.split( ',' )
+		.map( ( tag ) =>
+			tag
 				.replace( /^[\d.\-*]\s*/, '' )  // strip leading "1. " / "- " / "* "
 				.replace( /["']/g, '' )          // strip quotes
 				.trim()
 		)
-		.filter( ( line ) => line.length > 0 )
-		.slice( 0, 3 );
+		.filter( ( tag ) => tag.length > 0 )
+		.slice( 0, 5 );
 }
 
 // =============================================================================
