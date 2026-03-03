@@ -8,6 +8,7 @@ import { getActiveLinkMap }      from '../utils/linkKeywords';
 import {
 	fetchAIResponse,
 	extractTextFromBlocks,
+	extractTextFromSelectors,
 } from '../utils/aiHelper';
 
 /**
@@ -86,7 +87,13 @@ export default function AIAssistantPanel() {
 		setTagsLoading( true );
 
 		try {
-			const contextText = extractTextFromBlocks( blocks );
+			const rawSelectors = ( settings.contentSelectors ?? '' ).trim();
+			const selectors    = rawSelectors
+				? rawSelectors.split( '\n' ).map( ( s ) => s.trim() ).filter( Boolean )
+				: [];
+			const contextText  = selectors.length > 0
+				? extractTextFromSelectors( selectors )
+				: extractTextFromBlocks( blocks );
 
 			if ( ! contextText ) {
 				throw new Error(

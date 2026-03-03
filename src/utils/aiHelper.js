@@ -292,6 +292,59 @@ async function fetchTagSuggestions( contextText ) {
 }
 
 // =============================================================================
+// extractTextFromSelectors – reads content from custom DOM selectors
+// =============================================================================
+
+/**
+ * Reads plain-text content from DOM elements matching the given CSS selectors.
+ * Used as an alternative to extractTextFromBlocks() when custom content areas
+ * (ACF fields, template components, etc.) are configured in the plugin settings.
+ *
+ * - For <input> and <textarea> elements, reads .value.
+ * - For all other elements, strips HTML tags via a temporary div and reads
+ *   .textContent (same approach as extractTextFromBlocks).
+ * - Elements / values with ≤ 5 words are excluded (same rule as
+ *   extractTextFromBlocks) to avoid padding the prompt with labels or captions.
+ * - Invalid CSS selectors are silently skipped so a typo does not break the UI.
+ *
+ * @param { string[] } selectors  CSS selectors to query (one per settings line).
+ * @returns { string }
+ */
+export function extractTextFromSelectors( selectors ) {
+	const container = document.createElement( 'div' );
+	const texts     = [];
+
+	for ( const selector of selectors ) {
+		const trimmed = selector.trim();
+		if ( ! trimmed ) continue;
+
+		let elements;
+		try {
+			elements = document.querySelectorAll( trimmed );
+		} catch {
+			// Invalid selector – skip silently.
+			continue;
+		}
+
+		for ( const el of elements ) {
+			let text;
+			if ( el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ) {
+				text = ( el.value ?? '' ).trim();
+			} else {
+				container.innerHTML = el.innerHTML;
+				text = ( container.textContent ?? '' ).trim();
+			}
+
+			if ( text.split( /\s+/ ).filter( Boolean ).length > 5 ) {
+				texts.push( text );
+			}
+		}
+	}
+
+	return texts.join( '\n\n' );
+}
+
+// =============================================================================
 // sanitizeAIText – defence-in-depth against malformed / adversarial AI output
 // =============================================================================
 

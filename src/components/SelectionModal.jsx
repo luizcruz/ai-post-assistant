@@ -6,6 +6,7 @@ import {
 	fetchAIResponse,
 	sanitizeAIText,
 	extractTextFromBlocks,
+	extractTextFromSelectors,
 } from '../utils/aiHelper';
 
 /** Maximum character lengths enforced before writing to the data store. */
@@ -54,7 +55,15 @@ export default function SelectionModal( { type, onClose } ) {
 		setProgressMessage( '' );
 
 		try {
-			const contextText = extractTextFromBlocks( blocks );
+			// If custom CSS selectors are configured in the plugin settings,
+			// read content from those DOM elements instead of Gutenberg blocks.
+			const rawSelectors = ( window.aiPostAssistantData?.settings?.contentSelectors ?? '' ).trim();
+			const selectors    = rawSelectors
+				? rawSelectors.split( '\n' ).map( ( s ) => s.trim() ).filter( Boolean )
+				: [];
+			const contextText  = selectors.length > 0
+				? extractTextFromSelectors( selectors )
+				: extractTextFromBlocks( blocks );
 
 			if ( ! contextText ) {
 				throw new Error(
