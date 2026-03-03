@@ -55,12 +55,11 @@ export default function SelectionModal( { type, onClose } ) {
 		setProgressMessage( '' );
 
 		try {
-			// If custom CSS selectors are configured in the plugin settings,
-			// read content from those DOM elements instead of Gutenberg blocks.
-			const rawSelectors = ( window.aiPostAssistantData?.settings?.contentSelectors ?? '' ).trim();
-			const selectors    = rawSelectors
-				? rawSelectors.split( '\n' ).map( ( s ) => s.trim() ).filter( Boolean )
-				: [];
+			// Each feature has its own CSS selector setting so content can be
+			// sourced from ACF fields or custom elements independently.
+			const settingKey   = type === 'title' ? 'selectorTitles' : 'selectorResumo';
+			const rawSelector  = ( window.aiPostAssistantData?.settings?.[ settingKey ] ?? '' ).trim();
+			const selectors    = rawSelector ? [ rawSelector ] : [];
 			const contextText  = selectors.length > 0
 				? extractTextFromSelectors( selectors )
 				: extractTextFromBlocks( blocks );

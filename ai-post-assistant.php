@@ -37,8 +37,10 @@ final class AI_Post_Assistant {
 	private const OPT_SEO_PROMPT             = 'ai_pa_seo_prompt';
 	// LanguageModel prompt (IA Tags)
 	private const OPT_TAGS_PROMPT            = 'ai_pa_tags_prompt';
-	// Content selectors (ACF / custom components)
-	private const OPT_CONTENT_SELECTORS      = 'ai_pa_content_selectors';
+	// Content selectors per feature (ACF / custom components)
+	private const OPT_SELECTOR_TITLES        = 'ai_pa_selector_titles';
+	private const OPT_SELECTOR_RESUMO        = 'ai_pa_selector_resumo';
+	private const OPT_SELECTOR_TAGS          = 'ai_pa_selector_tags';
 	// Link injector (IA Links)
 	private const OPT_LINK_MAX_PER_KEYWORD   = 'ai_pa_link_max_per_keyword';
 	private const OPT_LINK_MAP               = 'ai_pa_link_map';
@@ -130,8 +132,10 @@ final class AI_Post_Assistant {
 			'seoPrompt'         => (string) get_option( self::OPT_SEO_PROMPT, self::DEFAULT_SEO_PROMPT ),
 			// LanguageModel prompt (IA Tags)
 			'tagsPrompt'        => (string) get_option( self::OPT_TAGS_PROMPT, self::DEFAULT_TAGS_PROMPT ),
-			// Content selectors (ACF / custom components) — empty = use Gutenberg blocks
-			'contentSelectors'     => (string) get_option( self::OPT_CONTENT_SELECTORS, '' ),
+			// Content selectors per feature — empty = use Gutenberg blocks (core/paragraph)
+			'selectorTitles'       => (string) get_option( self::OPT_SELECTOR_TITLES, '' ),
+			'selectorResumo'       => (string) get_option( self::OPT_SELECTOR_RESUMO, '' ),
+			'selectorTags'         => (string) get_option( self::OPT_SELECTOR_TAGS, '' ),
 			// Link injector (IA Links)
 			'linkMaxPerKeyword'    => max( 1, (int) get_option( self::OPT_LINK_MAX_PER_KEYWORD, 2 ) ),
 			'linkMap'              => (string) get_option( self::OPT_LINK_MAP, '' ),
@@ -190,32 +194,6 @@ final class AI_Post_Assistant {
 			);
 		}
 
-		// ── Seletores de conteúdo (ACF / componentes) ────────────────────────
-		add_settings_section(
-			'ai_pa_selectors_section',
-			__( 'Seletores de conteúdo (ACF / componentes)', 'ai-post-assistant' ),
-			static function (): void {
-				echo '<p>' . esc_html__(
-					'Por padrão o plugin extrai o texto dos blocos Gutenberg (core/paragraph). Se o conteúdo estiver em campos ACF ou em outros elementos da página do editor, insira um seletor CSS por linha. Quando preenchido, os seletores substituem a leitura dos blocos em todos os recursos.',
-					'ai-post-assistant'
-				) . '</p>';
-			},
-			'ai-post-assistant'
-		);
-
-		register_setting( 'ai_post_assistant', self::OPT_CONTENT_SELECTORS, [
-			'type'              => 'string',
-			'sanitize_callback' => 'sanitize_textarea_field',
-			'default'           => '',
-		] );
-		add_settings_field(
-			self::OPT_CONTENT_SELECTORS,
-			__( 'Seletores CSS (um por linha)', 'ai-post-assistant' ),
-			[ self::class, 'render_content_selectors_field' ],
-			'ai-post-assistant',
-			'ai_pa_selectors_section'
-		);
-
 		// ── IA Resumo – Summarizer ─────────────────────────────────────────────
 		add_settings_section(
 			'ai_pa_summarizer_section',
@@ -228,6 +206,20 @@ final class AI_Post_Assistant {
 				) . '</p>';
 			},
 			'ai-post-assistant'
+		);
+
+		register_setting( 'ai_post_assistant', self::OPT_SELECTOR_RESUMO, [
+			'type'              => 'string',
+			'sanitize_callback' => 'sanitize_textarea_field',
+			'default'           => '',
+		] );
+		add_settings_field(
+			self::OPT_SELECTOR_RESUMO,
+			__( 'Seletor de conteúdo (CSS)', 'ai-post-assistant' ),
+			[ self::class, 'render_selector_field' ],
+			'ai-post-assistant',
+			'ai_pa_summarizer_section',
+			[ 'option' => self::OPT_SELECTOR_RESUMO ]
 		);
 
 		register_setting( 'ai_post_assistant', self::OPT_SUMMARIZER_TYPE, [
@@ -268,6 +260,20 @@ final class AI_Post_Assistant {
 			'ai-post-assistant'
 		);
 
+		register_setting( 'ai_post_assistant', self::OPT_SELECTOR_TITLES, [
+			'type'              => 'string',
+			'sanitize_callback' => 'sanitize_textarea_field',
+			'default'           => '',
+		] );
+		add_settings_field(
+			self::OPT_SELECTOR_TITLES,
+			__( 'Seletor de conteúdo (CSS)', 'ai-post-assistant' ),
+			[ self::class, 'render_selector_field' ],
+			'ai-post-assistant',
+			'ai_pa_titles_section',
+			[ 'option' => self::OPT_SELECTOR_TITLES ]
+		);
+
 		register_setting( 'ai_post_assistant', self::OPT_SEO_PROMPT, [
 			'type'              => 'string',
 			'sanitize_callback' => 'sanitize_textarea_field',
@@ -288,6 +294,20 @@ final class AI_Post_Assistant {
 				) . '</p>';
 			},
 			'ai-post-assistant'
+		);
+
+		register_setting( 'ai_post_assistant', self::OPT_SELECTOR_TAGS, [
+			'type'              => 'string',
+			'sanitize_callback' => 'sanitize_textarea_field',
+			'default'           => '',
+		] );
+		add_settings_field(
+			self::OPT_SELECTOR_TAGS,
+			__( 'Seletor de conteúdo (CSS)', 'ai-post-assistant' ),
+			[ self::class, 'render_selector_field' ],
+			'ai-post-assistant',
+			'ai_pa_tags_section',
+			[ 'option' => self::OPT_SELECTOR_TAGS ]
 		);
 
 		register_setting( 'ai_post_assistant', self::OPT_TAGS_PROMPT, [
@@ -401,17 +421,23 @@ final class AI_Post_Assistant {
 		);
 	}
 
-	public static function render_content_selectors_field(): void {
-		$value       = (string) get_option( self::OPT_CONTENT_SELECTORS, '' );
-		$placeholder = ".acf-field[data-name=\"corpo\"] .acf-input\n.acf-field[data-name=\"conteudo\"] textarea";
+	/**
+	 * Shared renderer for per-feature CSS selector fields.
+	 * Receives the option key via $args['option'] (WordPress add_settings_field args).
+	 *
+	 * @param array{ option: string } $args
+	 */
+	public static function render_selector_field( array $args ): void {
+		$option      = (string) ( $args['option'] ?? '' );
+		$value       = (string) get_option( $option, '' );
+		$placeholder = 'textarea[name="acf[field_63c8e9931cf67]"]';
 		printf(
-			'<textarea name="%1$s" id="%1$s" rows="5" cols="80" class="large-text code" placeholder="%2$s">%3$s</textarea>
-			 <p class="description">%4$s<br>%5$s</p>',
-			esc_attr( self::OPT_CONTENT_SELECTORS ),
+			'<input type="text" name="%1$s" id="%1$s" value="%2$s" class="large-text code" placeholder="%3$s" />
+			 <p class="description">%4$s</p>',
+			esc_attr( $option ),
+			esc_attr( $value ),
 			esc_attr( $placeholder ),
-			esc_textarea( $value ),
-			esc_html__( 'Exemplos: .acf-field[data-name="corpo"] .acf-input · textarea[name="acf[field_abc123]"] · .wp-block-acf-meu-bloco', 'ai-post-assistant' ),
-			esc_html__( 'Deixe vazio para usar os blocos Gutenberg padrão (core/paragraph). Para <input> e <textarea>, o plugin lê o atributo value; para outros elementos, extrai o textContent.', 'ai-post-assistant' )
+			esc_html__( 'Seletor CSS do elemento que contém o conteúdo (ex: textarea[name="acf[field_abc]"]). Para campos <input>/<textarea> o plugin lê o .value; para outros elementos lê o .textContent. Deixe vazio para usar os blocos Gutenberg padrão (core/paragraph).', 'ai-post-assistant' )
 		);
 	}
 

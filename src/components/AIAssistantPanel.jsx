@@ -87,10 +87,8 @@ export default function AIAssistantPanel() {
 		setTagsLoading( true );
 
 		try {
-			const rawSelectors = ( settings.contentSelectors ?? '' ).trim();
-			const selectors    = rawSelectors
-				? rawSelectors.split( '\n' ).map( ( s ) => s.trim() ).filter( Boolean )
-				: [];
+			const rawSelector = ( settings.selectorTags ?? '' ).trim();
+			const selectors   = rawSelector ? [ rawSelector ] : [];
 			const contextText  = selectors.length > 0
 				? extractTextFromSelectors( selectors )
 				: extractTextFromBlocks( blocks );
