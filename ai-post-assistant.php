@@ -423,12 +423,12 @@ final class AI_Post_Assistant {
 	}
 
 	public static function render_link_max_field(): void {
-		$value = max( 1, (int) get_option( self::OPT_LINK_MAX_PER_KEYWORD, 2 ) );
+		$value = max( 1, absint( get_option( self::OPT_LINK_MAX_PER_KEYWORD, 2 ) ) );
 		printf(
 			'<input type="number" name="%1$s" id="%1$s" value="%2$d" min="1" max="10" class="small-text" />
 			 <p class="description">%3$s</p>',
 			esc_attr( self::OPT_LINK_MAX_PER_KEYWORD ),
-			$value,
+			absint( $value ),
 			esc_html__( 'Número máximo de vezes que a mesma palavra-chave pode ser linkada em um artigo (padrão: 2).', 'ai-post-assistant' )
 		);
 	}
@@ -588,7 +588,9 @@ final class AI_Post_Assistant {
 			wp_send_json_error( __( 'Chave de API da OpenAI não configurada nas opções do plugin.', 'ai-post-assistant' ), 400 );
 		}
 
-		$prompt = sanitize_textarea_field( wp_unslash( $_POST['prompt'] ?? '' ) );
+		$prompt = isset( $_POST['prompt'] )
+			? sanitize_textarea_field( wp_unslash( $_POST['prompt'] ) )
+			: '';
 		if ( '' === $prompt ) {
 			wp_send_json_error( __( 'Prompt vazio.', 'ai-post-assistant' ), 400 );
 		}
