@@ -292,56 +292,47 @@ async function fetchTagSuggestions( contextText ) {
 }
 
 // =============================================================================
-// extractTextFromSelectors – reads content from custom DOM selectors
+// writeToElement – writes AI result to a target DOM element
 // =============================================================================
 
 /**
- * Reads plain-text content from DOM elements matching the given CSS selectors.
- * Used as an alternative to extractTextFromBlocks() when custom content areas
- * (ACF fields, template components, etc.) are configured in the plugin settings.
+ * Writes text to the DOM element matched by the given CSS selector.
+ * Used to direct AI-generated output to custom fields (ACF, template
+ * components, etc.) when a target selector is configured in the plugin settings.
  *
- * - For <input> and <textarea> elements, reads .value.
- * - For all other elements, strips HTML tags via a temporary div and reads
- *   .textContent (same approach as extractTextFromBlocks).
- * - Elements / values with ≤ 5 words are excluded (same rule as
- *   extractTextFromBlocks) to avoid padding the prompt with labels or captions.
- * - Invalid CSS selectors are silently skipped so a typo does not break the UI.
+ * - For <input> and <textarea> elements, sets .value via the native setter
+ *   (bypasses React's controlled-input guard) and fires input + change events
+ *   so ACF / other frameworks pick up the new value.
+ * - For all other elements, sets .textContent directly.
+ * - Invalid CSS selectors or missing elements are silently ignored.
  *
- * @param { string[] } selectors  CSS selectors to query (one per settings line).
- * @returns { string }
+ * @param { string } selector  CSS selector for the target element.
+ * @param { string } text      The text to write into the element.
  */
-export function extractTextFromSelectors( selectors ) {
-	const container = document.createElement( 'div' );
-	const texts     = [];
-
-	for ( const selector of selectors ) {
-		const trimmed = selector.trim();
-		if ( ! trimmed ) continue;
-
-		let elements;
-		try {
-			elements = document.querySelectorAll( trimmed );
-		} catch {
-			// Invalid selector – skip silently.
-			continue;
-		}
-
-		for ( const el of elements ) {
-			let text;
-			if ( el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ) {
-				text = ( el.value ?? '' ).trim();
-			} else {
-				container.innerHTML = el.innerHTML;
-				text = ( container.textContent ?? '' ).trim();
-			}
-
-			if ( text.split( /\s+/ ).filter( Boolean ).length > 5 ) {
-				texts.push( text );
-			}
-		}
+export function writeToElement( selector, text ) {
+	let el;
+	try {
+		el = document.querySelector( selector );
+	} catch {
+		return; // Invalid selector – fail silently.
 	}
+	if ( ! el ) return;
 
-	return texts.join( '\n\n' );
+	if ( el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ) {
+		const proto = el.tagName === 'TEXTAREA'
+			? HTMLTextAreaElement.prototype
+			: HTMLInputElement.prototype;
+		const nativeSet = Object.getOwnPropertyDescriptor( proto, 'value' )?.set;
+		if ( nativeSet ) {
+			nativeSet.call( el, text );
+		} else {
+			el.value = text;
+		}
+		el.dispatchEvent( new Event( 'input',  { bubbles: true } ) );
+		el.dispatchEvent( new Event( 'change', { bubbles: true } ) );
+	} else {
+		el.textContent = text;
+	}
 }
 
 // =============================================================================

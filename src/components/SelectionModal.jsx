@@ -6,7 +6,7 @@ import {
 	fetchAIResponse,
 	sanitizeAIText,
 	extractTextFromBlocks,
-	extractTextFromSelectors,
+	writeToElement,
 } from '../utils/aiHelper';
 
 /** Maximum character lengths enforced before writing to the data store. */
@@ -55,14 +55,9 @@ export default function SelectionModal( { type, onClose } ) {
 		setProgressMessage( '' );
 
 		try {
-			// Each feature has its own CSS selector setting so content can be
-			// sourced from ACF fields or custom elements independently.
-			const settingKey   = type === 'title' ? 'selectorTitles' : 'selectorResumo';
-			const rawSelector  = ( window.aiPostAssistantData?.settings?.[ settingKey ] ?? '' ).trim();
-			const selectors    = rawSelector ? [ rawSelector ] : [];
-			const contextText  = selectors.length > 0
-				? extractTextFromSelectors( selectors )
-				: extractTextFromBlocks( blocks );
+			// Source is always the Gutenberg blocks. The CSS selector setting
+			// controls where the result is written, not where it is read from.
+			const contextText = extractTextFromBlocks( blocks );
 
 			if ( ! contextText ) {
 				throw new Error(
@@ -99,8 +94,18 @@ export default function SelectionModal( { type, onClose } ) {
 	// ------------------------------------------------------------------
 
 	function handleSelect( text ) {
-		const key = type === 'title' ? 'title' : 'excerpt';
-		editPost( { [ key ]: sanitizeAIText( text, maxLen ) } );
+		const sanitized   = sanitizeAIText( text, maxLen );
+		const settingKey  = type === 'title' ? 'selectorTitles' : 'selectorResumo';
+		const rawSelector = ( window.aiPostAssistantData?.settings?.[ settingKey ] ?? '' ).trim();
+
+		if ( rawSelector ) {
+			// Write to the configured target element (e.g. an ACF field).
+			writeToElement( rawSelector, sanitized );
+		} else {
+			// Default: write to the native WordPress title or excerpt field.
+			const key = type === 'title' ? 'title' : 'excerpt';
+			editPost( { [ key ]: sanitized } );
+		}
 		onClose();
 	}
 

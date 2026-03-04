@@ -8,7 +8,7 @@ import { getActiveLinkMap }      from '../utils/linkKeywords';
 import {
 	fetchAIResponse,
 	extractTextFromBlocks,
-	extractTextFromSelectors,
+	writeToElement,
 } from '../utils/aiHelper';
 
 /**
@@ -87,11 +87,9 @@ export default function AIAssistantPanel() {
 		setTagsLoading( true );
 
 		try {
-			const rawSelector = ( settings.selectorTags ?? '' ).trim();
-			const selectors   = rawSelector ? [ rawSelector ] : [];
-			const contextText  = selectors.length > 0
-				? extractTextFromSelectors( selectors )
-				: extractTextFromBlocks( blocks );
+			// Source is always the Gutenberg blocks. The CSS selector setting
+			// controls where the result is written, not where it is read from.
+			const contextText = extractTextFromBlocks( blocks );
 
 			if ( ! contextText ) {
 				throw new Error(
@@ -105,7 +103,14 @@ export default function AIAssistantPanel() {
 				throw new Error( __( 'O modelo não retornou tags.', 'ai-post-assistant' ) );
 			}
 
-			await insertTagsIntoSidebarField( tags );
+			const rawSelector = ( settings.selectorTags ?? '' ).trim();
+			if ( rawSelector ) {
+				// Write comma-separated tags to the configured target element.
+				writeToElement( rawSelector, tags.join( ', ' ) );
+			} else {
+				// Default: insert tags into the native Gutenberg Tags sidebar field.
+				await insertTagsIntoSidebarField( tags );
+			}
 		} catch ( err ) {
 			setTagsError( typeof err?.message === 'string' ? err.message : String( err ) );
 		} finally {

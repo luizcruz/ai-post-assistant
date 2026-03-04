@@ -437,7 +437,7 @@ final class AI_Post_Assistant {
 			esc_attr( $option ),
 			esc_attr( $value ),
 			esc_attr( $placeholder ),
-			esc_html__( 'Seletor CSS do elemento que contém o conteúdo (ex: textarea[name="acf[field_abc]"]). Para campos <input>/<textarea> o plugin lê o .value; para outros elementos lê o .textContent. Deixe vazio para usar os blocos Gutenberg padrão (core/paragraph).', 'ai-post-assistant' )
+			esc_html__( 'Seletor CSS do elemento de destino onde o resultado da IA será escrito (ex: textarea[name="acf[field_abc]"]). Para campos <input>/<textarea>, o plugin define o .value e dispara eventos input/change. Para outros elementos, define o .textContent. Deixe vazio para gravar no campo nativo do WordPress (título ou resumo).', 'ai-post-assistant' )
 		);
 	}
 
