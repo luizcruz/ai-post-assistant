@@ -2,6 +2,7 @@ import { useState }              from '@wordpress/element';
 import { Button, Spinner }       from '@wordpress/components';
 import { useDispatch, useSelect } from '@wordpress/data';
 import { __ }                    from '@wordpress/i18n';
+import apiFetch                  from '@wordpress/api-fetch';
 import SelectionModal            from './SelectionModal';
 import { injectLinksIntoBlocks } from '../utils/linkInjector';
 import { getActiveLinkMap }      from '../utils/linkKeywords';
@@ -97,7 +98,12 @@ export default function AIAssistantPanel() {
 				);
 			}
 
-			const tags = await fetchAIResponse( 'tags', contextText );
+			// Fetch existing WP tags with more than 30 associated posts.
+			// The AI will select only from this list so suggestions stay
+			// consistent with the site's established taxonomy.
+			const allowedTags = await fetchTagsWithMinCount( 30 );
+
+			const tags = await fetchAIResponse( 'tags', contextText, null, allowedTags );
 
 			if ( ! tags.length ) {
 				throw new Error( __( 'O modelo não retornou tags.', 'ai-post-assistant' ) );
@@ -223,6 +229,35 @@ export default function AIAssistantPanel() {
 			) }
 		</>
 	);
+}
+
+// =============================================================================
+// Helpers – WordPress tags REST API
+// =============================================================================
+
+/**
+ * Fetches existing WordPress tags that have more than `minCount` associated
+ * posts via the WP REST API. Returns an array of tag name strings.
+ *
+ * Tags are fetched ordered by count descending (top 100) so the most-used
+ * tags are always included. Any tag with count ≤ minCount is discarded.
+ * On failure the function returns an empty array so the caller can fall back
+ * to free-form AI generation.
+ *
+ * @param { number } minCount  Minimum post count threshold (exclusive).
+ * @returns { Promise<string[]> }
+ */
+async function fetchTagsWithMinCount( minCount ) {
+	try {
+		const tags = await apiFetch( {
+			path: '/wp/v2/tags?per_page=100&orderby=count&order=desc',
+		} );
+		return tags
+			.filter( ( tag ) => tag.count > minCount )
+			.map( ( tag ) => tag.name );
+	} catch {
+		return [];
+	}
 }
 
 // =============================================================================

@@ -25,6 +25,14 @@ const DEFAULT_TAGS_PROMPT =
 	"Act as a semantic extractor. Identify the document's main vector theme, then find 5 phrases from within the text that have the highest similarity to that theme. Format: tag1, tag2, tag3....\n\n" +
 	'Text:\n{{context}}';
 
+// Used when an allowedTags list is provided: the AI selects from existing tags
+// instead of generating new ones. {{context}} = article text, {{tags}} = tag list.
+const DEFAULT_TAGS_SELECTION_PROMPT =
+	'You are a tag classifier. Given the article below and a list of existing tags, select the tags from the list that best match the article content.\n' +
+	'Return only the selected tags as a comma-separated list, using the exact names from the provided list. Do not invent new tags.\n\n' +
+	'Article:\n{{context}}\n\n' +
+	'Available tags:\n{{tags}}';
+
 // Used only by the OpenAI fallback for the excerpt pipeline (Summarizer + Translator replaced).
 const DEFAULT_EXCERPT_FALLBACK_PROMPT =
 	'Escreva um resumo conciso em português deste artigo (máximo 150 palavras), adequado como descrição editorial.\n' +
@@ -100,7 +108,7 @@ async function callOpenAIFallback( prompt ) {
  *        Only fires for the 'excerpt' pipeline.
  * @returns { Promise<string[]> }
  */
-export async function fetchAIResponse( promptType, contextText, onProgress = null ) {
+export async function fetchAIResponse( promptType, contextText, onProgress = null, allowedTags = [] ) {
 	if ( promptType === 'title' ) {
 		return fetchTitleSuggestions( contextText );
 	}
@@ -108,7 +116,7 @@ export async function fetchAIResponse( promptType, contextText, onProgress = nul
 		return fetchExcerptSuggestion( contextText, onProgress );
 	}
 	if ( promptType === 'tags' ) {
-		return fetchTagSuggestions( contextText );
+		return fetchTagSuggestions( contextText, allowedTags );
 	}
 	throw new Error( `Tipo de prompt desconhecido: ${ promptType }` );
 }
@@ -242,19 +250,32 @@ async function fetchExcerptSuggestion( contextText, onProgress ) {
 // -----------------------------------------------------------------------------
 
 /**
- * Uses Chrome's LanguageModel API to extract 3 relevant tag suggestions
- * from the post content via text mining.
+ * Uses Chrome's LanguageModel API to suggest tags for the post content.
  *
- * The model is instructed to identify the most meaningful terms present
- * in the article (teams, competitions, athletes, sports concepts) and
- * return them as short tag names ready for WordPress taxonomy.
+ * When `allowedTags` is provided (non-empty), the model selects the most
+ * relevant tags from that list instead of generating new ones. The output
+ * is then filtered against the list (case-insensitive) so only valid
+ * existing tags are returned.
  *
- * @param { string } contextText
- * @returns { Promise<string[]> }  Up to 3 tag name strings.
+ * When `allowedTags` is empty, the model extracts tag candidates freely
+ * using the user-configured prompt (or the default).
+ *
+ * @param { string }   contextText
+ * @param { string[] } allowedTags  Pre-filtered list of existing WP tags.
+ * @returns { Promise<string[]> }   Up to 5 tag name strings.
  */
-async function fetchTagSuggestions( contextText ) {
-	const promptTemplate = SETTINGS.tagsPrompt || DEFAULT_TAGS_PROMPT;
-	const prompt = promptTemplate.replace( '{{context}}', contextText.substring( 0, 3000 ) );
+async function fetchTagSuggestions( contextText, allowedTags = [] ) {
+	const usingAllowedList = allowedTags.length > 0;
+
+	let prompt;
+	if ( usingAllowedList ) {
+		prompt = DEFAULT_TAGS_SELECTION_PROMPT
+			.replace( '{{context}}', contextText.substring( 0, 3000 ) )
+			.replace( '{{tags}}', allowedTags.join( ', ' ) );
+	} else {
+		const promptTemplate = SETTINGS.tagsPrompt || DEFAULT_TAGS_PROMPT;
+		prompt = promptTemplate.replace( '{{context}}', contextText.substring( 0, 3000 ) );
+	}
 
 	let responseText;
 
@@ -276,9 +297,8 @@ async function fetchTagSuggestions( contextText ) {
 		throw new Error( 'Chrome LanguageModel API não disponível. Ative o fallback OpenAI nas configurações do plugin.' );
 	}
 
-	// The prompt requests comma-separated output; normalise newlines to commas
-	// so the parser works even if the model adds line breaks between items.
-	return responseText
+	// Parse the comma-separated (or newline-separated) response.
+	const parsed = responseText
 		.replace( /\n/g, ',' )
 		.split( ',' )
 		.map( ( tag ) =>
@@ -287,8 +307,19 @@ async function fetchTagSuggestions( contextText ) {
 				.replace( /["']/g, '' )          // strip quotes
 				.trim()
 		)
-		.filter( ( tag ) => tag.length > 0 )
-		.slice( 0, 5 );
+		.filter( ( tag ) => tag.length > 0 );
+
+	if ( usingAllowedList ) {
+		// Map parsed names back to the canonical tag name from allowedTags
+		// using case-insensitive matching so "flamengo" resolves to "Flamengo".
+		const allowedMap = new Map( allowedTags.map( ( t ) => [ t.toLowerCase(), t ] ) );
+		return parsed
+			.map( ( tag ) => allowedMap.get( tag.toLowerCase() ) )
+			.filter( Boolean )
+			.slice( 0, 5 );
+	}
+
+	return parsed.slice( 0, 5 );
 }
 
 // =============================================================================
