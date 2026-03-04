@@ -15,7 +15,7 @@ const MAX_LENGTHS = { title: 65, excerpt: 500 };
 /** Human-readable modal title per type. */
 const MODAL_LABELS = {
 	title:   'Sugestões de Título (SEO)',
-	excerpt: 'Sugestões de Resumo',
+	excerpt: 'Sugestões de Subtítulo',
 };
 
 /**

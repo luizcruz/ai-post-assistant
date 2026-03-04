@@ -226,10 +226,13 @@ function replaceInTextNode( textNode, regex, url, maxCount ) {
 
 		// The anchor – use match[0] to preserve the original casing from the
 		// article text rather than the keyword definition.
+		// Wrapped in <strong> so the linked keyword is also rendered in bold.
 		const anchor = document.createElement( 'a' );
 		anchor.href        = url;
 		anchor.textContent = match[ 0 ];
-		fragments.push( anchor );
+		const strong = document.createElement( 'strong' );
+		strong.appendChild( anchor );
+		fragments.push( strong );
 
 		count++;
 		lastIndex = regex.lastIndex;
