@@ -33,6 +33,7 @@ final class AI_Post_Assistant {
 	private const OPT_SUMMARIZER_TYPE        = 'ai_pa_summarizer_type';
 	private const OPT_SUMMARIZER_FORMAT      = 'ai_pa_summarizer_format';
 	private const OPT_SUMMARIZER_LENGTH      = 'ai_pa_summarizer_length';
+	private const OPT_RESUMO_MAX_LENGTH      = 'ai_pa_resumo_max_length';
 	// LanguageModel prompt (IA Títulos)
 	private const OPT_SEO_PROMPT             = 'ai_pa_seo_prompt';
 	// LanguageModel prompt (IA Tags)
@@ -72,6 +73,7 @@ final class AI_Post_Assistant {
 		add_action( 'enqueue_block_editor_assets', [ self::class, 'enqueue_editor_assets' ] );
 		add_action( 'admin_menu', [ self::class, 'add_settings_page' ] );
 		add_action( 'admin_init', [ self::class, 'register_settings' ] );
+		add_action( 'rest_api_init', [ self::class, 'register_rest_routes' ] );
 		add_action( 'wp_ajax_' . self::AJAX_ACTION, [ self::class, 'handle_openai_request' ] );
 	}
 
@@ -128,6 +130,7 @@ final class AI_Post_Assistant {
 			'summarizerType'    => (string) get_option( self::OPT_SUMMARIZER_TYPE, 'tldr' ),
 			'summarizerFormat'  => (string) get_option( self::OPT_SUMMARIZER_FORMAT, 'plain-text' ),
 			'summarizerLength'  => (string) get_option( self::OPT_SUMMARIZER_LENGTH, 'short' ),
+			'resumoMaxLength'   => max( 0, (int) get_option( self::OPT_RESUMO_MAX_LENGTH, 0 ) ),
 			// LanguageModel prompt (IA Títulos)
 			'seoPrompt'         => (string) get_option( self::OPT_SEO_PROMPT, self::DEFAULT_SEO_PROMPT ),
 			// LanguageModel prompt (IA Tags)
@@ -137,12 +140,53 @@ final class AI_Post_Assistant {
 			'selectorResumo'       => (string) get_option( self::OPT_SELECTOR_RESUMO, '' ),
 			'selectorTags'         => (string) get_option( self::OPT_SELECTOR_TAGS, '' ),
 			// Link injector (IA Links)
+			// The full link-map JSON is served via REST (/ai-pa/v1/link-map) and
+			// cached client-side.  Only the MD5 hash is inlined here so the JS
+			// can detect when the map has changed and invalidate its cache.
 			'linkMaxPerKeyword'    => max( 1, (int) get_option( self::OPT_LINK_MAX_PER_KEYWORD, 2 ) ),
-			'linkMap'              => (string) get_option( self::OPT_LINK_MAP, '' ),
+			'linkMapHash'          => self::get_link_map_hash(),
 			// OpenAI fallback – API key is intentionally NOT exposed to the browser
 			'enableOpenAIFallback' => '1' === get_option( self::OPT_ENABLE_OPENAI_FALLBACK, '0' ),
 			'openAIModel'          => (string) get_option( self::OPT_OPENAI_MODEL, 'gpt-4o-mini' ),
 		];
+	}
+
+	// ── REST API ───────────────────────────────────────────────────────────────
+
+	/**
+	 * Registers the plugin's REST routes.
+	 * Called on `rest_api_init`.
+	 */
+	public static function register_rest_routes(): void {
+		register_rest_route( 'ai-pa/v1', '/link-map', [
+			'methods'             => WP_REST_Server::READABLE,
+			'callback'            => [ self::class, 'rest_get_link_map' ],
+			'permission_callback' => static fn() => current_user_can( 'edit_posts' ),
+		] );
+	}
+
+	/**
+	 * REST callback: returns the saved link map as a JSON array.
+	 * An empty array signals the JS to fall back to its built-in LINK_MAP.
+	 *
+	 * @return WP_REST_Response
+	 */
+	public static function rest_get_link_map(): WP_REST_Response {
+		$raw  = (string) get_option( self::OPT_LINK_MAP, '' );
+		$data = '' !== $raw ? json_decode( $raw, true ) : [];
+		return new WP_REST_Response( is_array( $data ) ? $data : [], 200 );
+	}
+
+	/**
+	 * Returns the MD5 hash of the stored link-map JSON, or an empty string
+	 * when no custom map has been saved.  The hash is used by the JS cache
+	 * to detect changes without transferring the full JSON on every page load.
+	 *
+	 * @return string
+	 */
+	private static function get_link_map_hash(): string {
+		$raw = (string) get_option( self::OPT_LINK_MAP, '' );
+		return '' !== $raw ? md5( $raw ) : '';
 	}
 
 	// ── Settings page ─────────────────────────────────────────────────────────
@@ -245,6 +289,14 @@ final class AI_Post_Assistant {
 		] );
 		add_settings_field( self::OPT_SUMMARIZER_LENGTH, __( 'Comprimento do resumo', 'ai-post-assistant' ),
 			[ self::class, 'render_summarizer_length_field' ], 'ai-post-assistant', 'ai_pa_summarizer_section' );
+
+		register_setting( 'ai_post_assistant', self::OPT_RESUMO_MAX_LENGTH, [
+			'type'              => 'integer',
+			'sanitize_callback' => [ self::class, 'sanitize_resumo_max_length' ],
+			'default'           => 0,
+		] );
+		add_settings_field( self::OPT_RESUMO_MAX_LENGTH, __( 'Limite de caracteres', 'ai-post-assistant' ),
+			[ self::class, 'render_resumo_max_length_field' ], 'ai-post-assistant', 'ai_pa_summarizer_section' );
 
 		// ── IA Títulos – LanguageModel prompt ─────────────────────────────────
 		add_settings_section(
@@ -470,6 +522,17 @@ final class AI_Post_Assistant {
 		self::render_select( self::OPT_SUMMARIZER_LENGTH, $options, $value );
 	}
 
+	public static function render_resumo_max_length_field(): void {
+		$value = max( 0, (int) get_option( self::OPT_RESUMO_MAX_LENGTH, 0 ) );
+		printf(
+			'<input type="number" name="%1$s" id="%1$s" value="%2$d" min="0" max="2000" step="10" class="small-text" />
+			 <p class="description">%3$s</p>',
+			esc_attr( self::OPT_RESUMO_MAX_LENGTH ),
+			$value,
+			esc_html__( 'Número máximo de caracteres do resumo gerado. Se o texto produzido ultrapassar este limite, será cortado. Use 0 para sem limite.', 'ai-post-assistant' )
+		);
+	}
+
 	public static function render_seo_prompt_field(): void {
 		$value = (string) get_option( self::OPT_SEO_PROMPT, self::DEFAULT_SEO_PROMPT );
 		printf(
@@ -556,6 +619,11 @@ final class AI_Post_Assistant {
 	public static function sanitize_summarizer_length( mixed $value ): string {
 		$allowed = [ 'short', 'medium', 'long' ];
 		return in_array( $value, $allowed, true ) ? (string) $value : 'short';
+	}
+
+	public static function sanitize_resumo_max_length( mixed $value ): int {
+		$int = (int) $value;
+		return $int >= 0 ? $int : 0;
 	}
 
 	public static function sanitize_link_max( mixed $value ): int {

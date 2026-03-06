@@ -38,8 +38,9 @@ export default function AIAssistantPanel() {
 	const [ openModal, setOpenModal ] = useState( null );
 
 	// IA Links feedback state
-	const [ linksStatus, setLinksStatus ] = useState( '' ); // '' | 'done' | 'none'
-	const [ linksAdded, setLinksAdded ]   = useState( 0 );
+	const [ linksStatus, setLinksStatus ]   = useState( '' ); // '' | 'done' | 'none'
+	const [ linksAdded, setLinksAdded ]     = useState( 0 );
+	const [ linksLoading, setLinksLoading ] = useState( false );
 
 	// IA Tags inline state
 	const [ tagsLoading, setTagsLoading ] = useState( false );
@@ -55,27 +56,35 @@ export default function AIAssistantPanel() {
 	// IA Links handler
 	// ------------------------------------------------------------------
 
-	function handleInjectLinks() {
+	async function handleInjectLinks() {
 		setLinksStatus( '' );
+		setLinksLoading( true );
 
-		const maxPerKeyword = Math.max( 1, Number( settings.linkMaxPerKeyword ) || 2 );
-		const linkMap       = getActiveLinkMap();
+		try {
+			const maxPerKeyword = Math.max( 1, Number( settings.linkMaxPerKeyword ) || 2 );
 
-		const { updatedBlocks, totalLinksAdded } = injectLinksIntoBlocks(
-			blocks,
-			linkMap,
-			maxPerKeyword
-		);
+			// getActiveLinkMap is async: resolves from memory → localStorage → REST.
+			// For cached hits this resolves in the same microtask tick (< 1 ms).
+			const linkMap = await getActiveLinkMap();
 
-		for ( const block of updatedBlocks ) {
-			const original = blocks.find( ( b ) => b.clientId === block.clientId );
-			if ( original?.attributes?.content !== block.attributes?.content ) {
-				updateBlockAttributes( block.clientId, { content: block.attributes.content } );
+			const { updatedBlocks, totalLinksAdded } = injectLinksIntoBlocks(
+				blocks,
+				linkMap,
+				maxPerKeyword
+			);
+
+			for ( const block of updatedBlocks ) {
+				const original = blocks.find( ( b ) => b.clientId === block.clientId );
+				if ( original?.attributes?.content !== block.attributes?.content ) {
+					updateBlockAttributes( block.clientId, { content: block.attributes.content } );
+				}
 			}
-		}
 
-		setLinksAdded( totalLinksAdded );
-		setLinksStatus( totalLinksAdded > 0 ? 'done' : 'none' );
+			setLinksAdded( totalLinksAdded );
+			setLinksStatus( totalLinksAdded > 0 ? 'done' : 'none' );
+		} finally {
+			setLinksLoading( false );
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -179,9 +188,17 @@ export default function AIAssistantPanel() {
 						<Button
 							variant="primary"
 							onClick={ handleInjectLinks }
+							disabled={ linksLoading }
 							style={ btnStyle }
 						>
-							{ __( '✨ IA Links', 'ai-post-assistant' ) }
+							{ linksLoading ? (
+								<>
+									<Spinner />
+									{ __( ' Carregando links…', 'ai-post-assistant' ) }
+								</>
+							) : (
+								__( '✨ IA Links', 'ai-post-assistant' )
+							) }
 						</Button>
 					) }
 

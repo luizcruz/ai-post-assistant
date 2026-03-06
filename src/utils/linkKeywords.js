@@ -1,24 +1,82 @@
-/**
- * getActiveLinkMap – returns the link map to use at runtime.
- *
- * Reads `window.aiPostAssistantData.settings.linkMap` (saved via the admin
- * settings page). If the option is empty or contains invalid JSON the
- * hardcoded LINK_MAP below is used as a safe fallback.
- *
- * @returns { Array<{url: string, keywords: string[]}> }
- */
-export function getActiveLinkMap() {
-	const raw = window.aiPostAssistantData?.settings?.linkMap ?? '';
+import apiFetch from '@wordpress/api-fetch';
 
-	if ( raw.trim() ) {
-		try {
-			const parsed = JSON.parse( raw );
-			if ( Array.isArray( parsed ) && parsed.length > 0 ) {
-				return parsed;
+// =============================================================================
+// Client-side cache for the link map
+// =============================================================================
+//
+// The full JSON is no longer inlined in the page HTML.  Instead, PHP exposes
+// only an MD5 hash (`settings.linkMapHash`) and the data is loaded on demand
+// from GET /ai-pa/v1/link-map, then stored in two complementary caches:
+//
+//  • In-memory (_mapCache / _mapHash)
+//    Instant on subsequent button clicks within the same editor session.
+//    Cleared on page reload (intentional — keeps memory clean).
+//
+//  • localStorage (LS_KEY)
+//    Survives page reloads.  Keyed by the content hash so it is automatically
+//    invalidated whenever the admin saves a new link map.
+//
+// Resolution order on each call:
+//  1. No custom map configured (hash = '') → built-in LINK_MAP, no I/O.
+//  2. In-memory cache matches hash        → return, no I/O.
+//  3. localStorage entry matches hash     → warm memory cache, return.
+//  4. REST fetch                          → update both caches, return.
+//  5. Any error                           → built-in LINK_MAP as fallback.
+
+/** @type { Array<{url:string,keywords:string[]}> | null } */
+let _mapCache = null;
+let _mapHash  = '';
+
+const LS_KEY = 'ai_pa_link_map_v1';
+
+/**
+ * Returns the active link map.  Always resolves; never rejects.
+ *
+ * @returns { Promise<Array<{url: string, keywords: string[]}>> }
+ */
+export async function getActiveLinkMap() {
+	const hash = window.aiPostAssistantData?.settings?.linkMapHash ?? '';
+
+	// ── Tier 0: no custom map → built-in default, zero I/O ────────────────
+	if ( ! hash ) {
+		return LINK_MAP;
+	}
+
+	// ── Tier 1: in-memory cache ────────────────────────────────────────────
+	if ( _mapHash === hash && _mapCache !== null ) {
+		return _mapCache;
+	}
+
+	// ── Tier 2: localStorage cache ─────────────────────────────────────────
+	try {
+		const stored = localStorage.getItem( LS_KEY );
+		if ( stored ) {
+			const { h, d } = JSON.parse( stored );
+			if ( h === hash && Array.isArray( d ) && d.length > 0 ) {
+				_mapCache = d;
+				_mapHash  = hash;
+				return d;
 			}
-		} catch {
-			// Invalid JSON – fall back to the default list below.
 		}
+	} catch {
+		// localStorage unavailable or entry corrupt – fall through.
+	}
+
+	// ── Tier 3: REST endpoint ──────────────────────────────────────────────
+	try {
+		const data = await apiFetch( { path: '/ai-pa/v1/link-map' } );
+		if ( Array.isArray( data ) && data.length > 0 ) {
+			_mapCache = data;
+			_mapHash  = hash;
+			try {
+				localStorage.setItem( LS_KEY, JSON.stringify( { h: hash, d: data } ) );
+			} catch {
+				// localStorage full or blocked – silent.
+			}
+			return data;
+		}
+	} catch {
+		// Network or permission error – fall back to built-in default.
 	}
 
 	return LINK_MAP;

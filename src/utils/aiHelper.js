@@ -204,6 +204,8 @@ async function fetchTitleSuggestions( contextText ) {
  * @returns { Promise<string[]> }
  */
 async function fetchExcerptSuggestion( contextText, onProgress ) {
+	let result;
+
 	// Try Chrome Summarizer + Translator first; fall back to OpenAI if unavailable.
 	if ( typeof Summarizer !== 'undefined' ) {
 		try {
@@ -229,8 +231,7 @@ async function fetchExcerptSuggestion( contextText, onProgress ) {
 				},
 			} );
 
-			const summaryPt = await translator.translate( summaryEn );
-			return [ summaryPt ];
+			result = await translator.translate( summaryEn );
 		} catch ( chromeErr ) {
 			if ( ! SETTINGS.enableOpenAIFallback ) throw chromeErr;
 			// Fall through to OpenAI fallback below.
@@ -239,10 +240,19 @@ async function fetchExcerptSuggestion( contextText, onProgress ) {
 		throw new Error( 'Chrome Summarizer API não disponível. Ative o fallback OpenAI nas configurações do plugin.' );
 	}
 
-	// OpenAI fallback: single prompt produces a Portuguese summary directly.
-	const prompt = DEFAULT_EXCERPT_FALLBACK_PROMPT.replace( '{{context}}', contextText.substring( 0, 4000 ) );
-	const text   = await callOpenAIFallback( prompt );
-	return [ text ];
+	if ( result === undefined ) {
+		// OpenAI fallback: single prompt produces a Portuguese summary directly.
+		const prompt = DEFAULT_EXCERPT_FALLBACK_PROMPT.replace( '{{context}}', contextText.substring( 0, 4000 ) );
+		result = await callOpenAIFallback( prompt );
+	}
+
+	// Apply the configured character limit (0 = no limit).
+	const maxLen = Number( SETTINGS.resumoMaxLength ) || 0;
+	if ( maxLen > 0 && result.length > maxLen ) {
+		result = result.substring( 0, maxLen ).trimEnd();
+	}
+
+	return [ result ];
 }
 
 // -----------------------------------------------------------------------------
