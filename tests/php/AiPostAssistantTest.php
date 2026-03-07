@@ -182,6 +182,97 @@ class AiPostAssistantTest extends TestCase {
 	}
 
 	// =========================================================================
+	// sanitize_resumo_max_length()
+	// =========================================================================
+
+	public function test_sanitize_resumo_max_length_returns_positive_integer(): void {
+		$this->assertSame( 150, AI_Post_Assistant::sanitize_resumo_max_length( '150' ) );
+		$this->assertSame( 500, AI_Post_Assistant::sanitize_resumo_max_length( 500 ) );
+	}
+
+	public function test_sanitize_resumo_max_length_returns_zero_for_zero(): void {
+		$this->assertSame( 0, AI_Post_Assistant::sanitize_resumo_max_length( '0' ) );
+		$this->assertSame( 0, AI_Post_Assistant::sanitize_resumo_max_length( 0 ) );
+	}
+
+	public function test_sanitize_resumo_max_length_returns_zero_for_negative(): void {
+		$this->assertSame( 0, AI_Post_Assistant::sanitize_resumo_max_length( '-10' ) );
+		$this->assertSame( 0, AI_Post_Assistant::sanitize_resumo_max_length( -1 ) );
+	}
+
+	public function test_sanitize_resumo_max_length_returns_zero_for_non_numeric(): void {
+		$this->assertSame( 0, AI_Post_Assistant::sanitize_resumo_max_length( 'abc' ) );
+		$this->assertSame( 0, AI_Post_Assistant::sanitize_resumo_max_length( null ) );
+	}
+
+	// =========================================================================
+	// rest_get_link_map()
+	// =========================================================================
+
+	public function test_rest_get_link_map_returns_empty_array_when_no_map_saved(): void {
+		Functions\when( 'get_option' )->justReturn( '' );
+
+		$response = AI_Post_Assistant::rest_get_link_map();
+
+		$this->assertInstanceOf( WP_REST_Response::class, $response );
+		$this->assertSame( [], $response->data );
+		$this->assertSame( 200, $response->status );
+	}
+
+	public function test_rest_get_link_map_returns_decoded_array_for_valid_json(): void {
+		$json = '[{"url":"https://lance.com.br/flamengo","keywords":["Flamengo"]}]';
+		Functions\when( 'get_option' )->justReturn( $json );
+
+		$response = AI_Post_Assistant::rest_get_link_map();
+
+		$this->assertInstanceOf( WP_REST_Response::class, $response );
+		$this->assertCount( 1, $response->data );
+		$this->assertSame( 'https://lance.com.br/flamengo', $response->data[0]['url'] );
+		$this->assertSame( 200, $response->status );
+	}
+
+	public function test_rest_get_link_map_returns_empty_array_for_invalid_json(): void {
+		Functions\when( 'get_option' )->justReturn( 'not-valid-json' );
+
+		$response = AI_Post_Assistant::rest_get_link_map();
+
+		$this->assertInstanceOf( WP_REST_Response::class, $response );
+		$this->assertSame( [], $response->data );
+		$this->assertSame( 200, $response->status );
+	}
+
+	// =========================================================================
+	// get_settings() – linkMapHash
+	// =========================================================================
+
+	public function test_get_settings_returns_empty_link_map_hash_when_no_map_saved(): void {
+		// All get_option calls return null – OPT_LINK_MAP resolves to '' via (string) cast.
+		Functions\when( 'get_option' )->justReturn( null );
+
+		$settings = AI_Post_Assistant::get_settings();
+
+		$this->assertArrayHasKey( 'linkMapHash', $settings );
+		$this->assertSame( '', $settings['linkMapHash'] );
+	}
+
+	public function test_get_settings_returns_md5_hash_when_link_map_is_saved(): void {
+		$json = '[{"url":"https://lance.com.br/flamengo","keywords":["Flamengo"]}]';
+
+		// Return the JSON only for the link-map option; fall back to defaults otherwise.
+		Functions\when( 'get_option' )->alias(
+			static function ( string $option, mixed $default = null ) use ( $json ): mixed {
+				return 'ai_pa_link_map' === $option ? $json : ( $default ?? null );
+			}
+		);
+
+		$settings = AI_Post_Assistant::get_settings();
+
+		$this->assertArrayHasKey( 'linkMapHash', $settings );
+		$this->assertSame( md5( $json ), $settings['linkMapHash'] );
+		$this->assertNotSame( '', $settings['linkMapHash'] );
+	}
+
+	// =========================================================================
 	// enqueue_editor_assets() – happy path
 	// =========================================================================
 

@@ -18,11 +18,13 @@
  *    ✓ Shows "Nenhuma palavra-chave encontrada" when zero links added.
  *    ✓ Calls updateBlockAttributes only for blocks whose content changed.
  *    ✓ Does not call updateBlockAttributes when content is unchanged.
+ *    ✓ Shows spinner and disables button while loading.
  *
  *  IA Tags
  *    ✓ Shows spinner + disables button while AI request is in flight.
  *    ✓ Shows error message when fetchAIResponse rejects.
  *    ✓ Shows "no content" error when extractTextFromBlocks returns empty string.
+ *    ✓ Shows error when no existing tags with min count are found.
  *    ✓ On success: opens document sidebar and inserts each tag token.
  */
 
@@ -79,6 +81,11 @@ jest.mock( '@wordpress/i18n', () => ( {
 	__: ( text ) => text,
 } ), { virtual: true } );
 
+jest.mock( '@wordpress/api-fetch', () => ( {
+	__esModule: true,
+	default: jest.fn(),
+} ), { virtual: true } );
+
 // Stub SelectionModal – we assert on mount/unmount, not on its internals.
 jest.mock( '../../src/components/SelectionModal', () => ( {
 	__esModule: true,
@@ -98,16 +105,18 @@ jest.mock( '../../src/utils/linkKeywords', () => ( {
 } ) );
 
 jest.mock( '../../src/utils/aiHelper', () => ( {
-	fetchAIResponse:      jest.fn(),
+	fetchAIResponse:       jest.fn(),
 	extractTextFromBlocks: jest.fn(),
+	writeToElement:        jest.fn(),
 } ) );
 
 // ---------------------------------------------------------------------------
 // Imports after mocks are registered
 // ---------------------------------------------------------------------------
 
-import { injectLinksIntoBlocks } from '../../src/utils/linkInjector';
-import { getActiveLinkMap }      from '../../src/utils/linkKeywords';
+import apiFetch                                   from '@wordpress/api-fetch';
+import { injectLinksIntoBlocks }                  from '../../src/utils/linkInjector';
+import { getActiveLinkMap }                       from '../../src/utils/linkKeywords';
 import { fetchAIResponse, extractTextFromBlocks } from '../../src/utils/aiHelper';
 
 // ---------------------------------------------------------------------------
@@ -137,8 +146,9 @@ beforeEach( () => {
 	jest.clearAllMocks();
 	mockGetBlocks.mockReturnValue( MOCK_BLOCKS );
 	extractTextFromBlocks.mockReturnValue( 'contexto de texto suficiente para a IA' );
-	getActiveLinkMap.mockReturnValue( {} );
+	getActiveLinkMap.mockResolvedValue( [] );
 	injectLinksIntoBlocks.mockReturnValue( { updatedBlocks: [], totalLinksAdded: 0 } );
+	apiFetch.mockResolvedValue( [] );
 
 	// Mock requestAnimationFrame so async tag-insertion resolves instantly.
 	global.requestAnimationFrame = ( cb ) => { cb( 0 ); return 0; };
@@ -255,46 +265,54 @@ describe( 'AIAssistantPanel – modal lifecycle', () => {
 // ===========================================================================
 
 describe( 'AIAssistantPanel – IA Links', () => {
-	it( 'calls getActiveLinkMap and injectLinksIntoBlocks with the current blocks', () => {
-		const fakeMap = { Flamengo: 'https://lance.com.br/flamengo' };
-		getActiveLinkMap.mockReturnValue( fakeMap );
+	it( 'calls getActiveLinkMap and injectLinksIntoBlocks with the current blocks', async () => {
+		const fakeMap = [ { url: 'https://lance.com.br/flamengo', keywords: [ 'Flamengo' ] } ];
+		getActiveLinkMap.mockResolvedValue( fakeMap );
 		injectLinksIntoBlocks.mockReturnValue( { updatedBlocks: [], totalLinksAdded: 0 } );
 
 		renderPanel();
-		fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		} );
 
 		expect( getActiveLinkMap ).toHaveBeenCalledTimes( 1 );
 		expect( injectLinksIntoBlocks ).toHaveBeenCalledWith( MOCK_BLOCKS, fakeMap, 2 );
 	} );
 
-	it( 'shows "N links inseridos" when links were added', () => {
+	it( 'shows "N links inseridos" when links were added', async () => {
 		injectLinksIntoBlocks.mockReturnValue( { updatedBlocks: [], totalLinksAdded: 3 } );
 
 		renderPanel();
-		fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		} );
 
 		expect( screen.getByText( /3.*links inseridos/i ) ).toBeInTheDocument();
 	} );
 
-	it( 'shows "1 link inserido" with singular form when exactly one link is added', () => {
+	it( 'shows "1 link inserido" with singular form when exactly one link is added', async () => {
 		injectLinksIntoBlocks.mockReturnValue( { updatedBlocks: [], totalLinksAdded: 1 } );
 
 		renderPanel();
-		fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		} );
 
 		expect( screen.getByText( '1 link inserido.' ) ).toBeInTheDocument();
 	} );
 
-	it( 'shows "Nenhuma palavra-chave encontrada" when zero links were added', () => {
+	it( 'shows "Nenhuma palavra-chave encontrada" when zero links were added', async () => {
 		injectLinksIntoBlocks.mockReturnValue( { updatedBlocks: [], totalLinksAdded: 0 } );
 
 		renderPanel();
-		fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		} );
 
 		expect( screen.getByText( 'Nenhuma palavra-chave encontrada.' ) ).toBeInTheDocument();
 	} );
 
-	it( 'calls updateBlockAttributes only for blocks whose content changed', () => {
+	it( 'calls updateBlockAttributes only for blocks whose content changed', async () => {
 		const updatedBlock = {
 			clientId:   'block-1',
 			attributes: { content: 'Conteúdo <a href="#">alterado</a>.' },
@@ -309,7 +327,9 @@ describe( 'AIAssistantPanel – IA Links', () => {
 		] );
 
 		renderPanel();
-		fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		} );
 
 		expect( mockUpdateBlockAttributes ).toHaveBeenCalledTimes( 1 );
 		expect( mockUpdateBlockAttributes ).toHaveBeenCalledWith(
@@ -318,7 +338,7 @@ describe( 'AIAssistantPanel – IA Links', () => {
 		);
 	} );
 
-	it( 'does not call updateBlockAttributes when block content is unchanged', () => {
+	it( 'does not call updateBlockAttributes when block content is unchanged', async () => {
 		const sameContent = 'Conteúdo idêntico.';
 		const block = {
 			clientId:   'block-1',
@@ -332,18 +352,35 @@ describe( 'AIAssistantPanel – IA Links', () => {
 		mockGetBlocks.mockReturnValue( [ block ] );
 
 		renderPanel();
-		fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		} );
 
 		expect( mockUpdateBlockAttributes ).not.toHaveBeenCalled();
 	} );
 
-	it( 'uses linkMaxPerKeyword setting from window.aiPostAssistantData', () => {
+	it( 'uses linkMaxPerKeyword setting from window.aiPostAssistantData', async () => {
 		injectLinksIntoBlocks.mockReturnValue( { updatedBlocks: [], totalLinksAdded: 0 } );
 
 		renderPanel( { linkMaxPerKeyword: 5 } );
-		fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+		} );
 
 		expect( injectLinksIntoBlocks ).toHaveBeenCalledWith( expect.anything(), expect.anything(), 5 );
+	} );
+
+	it( 'shows spinner and disables button while loading', async () => {
+		// getActiveLinkMap never resolves – keeps the loading state active.
+		getActiveLinkMap.mockReturnValue( new Promise( () => {} ) );
+
+		renderPanel();
+		fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Links' } ) );
+
+		await waitFor( () => {
+			expect( screen.getByTestId( 'spinner' ) ).toBeInTheDocument();
+			expect( screen.getByRole( 'button', { name: /Carregando links/i } ) ).toBeDisabled();
+		} );
 	} );
 } );
 
@@ -393,8 +430,8 @@ describe( 'AIAssistantPanel – IA Tags', () => {
 	it( 'calls fetchAIResponse with type "tags" and the extracted context text', async () => {
 		const contextText = 'contexto de texto suficiente para a IA';
 		extractTextFromBlocks.mockReturnValue( contextText );
-		// Simulate missing tags input so the success path throws a
-		// predictable error without requiring a full DOM setup.
+		// apiFetch returns [] by default (from beforeEach) → no tags with count > 30
+		// → error thrown, but fetchAIResponse was already called.
 		fetchAIResponse.mockResolvedValueOnce( [ 'tag1', 'tag2' ] );
 
 		renderPanel();
@@ -405,8 +442,25 @@ describe( 'AIAssistantPanel – IA Tags', () => {
 		expect( fetchAIResponse ).toHaveBeenCalledWith( 'tags', contextText );
 	} );
 
-	it( 'opens the document sidebar when tags are successfully generated', async () => {
+	it( 'shows error when no existing tags with min count are found', async () => {
 		fetchAIResponse.mockResolvedValueOnce( [ 'tag1', 'tag2' ] );
+		// Return tags below the 30-count threshold → all filtered out.
+		apiFetch.mockResolvedValue( [ { name: 'tag1', count: 5 } ] );
+
+		renderPanel();
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: '✨ IA Tags' } ) );
+		} );
+
+		expect( screen.getByRole( 'alert' ) ).toHaveTextContent(
+			'Nenhuma tag existente com mais de 30 conteúdos foi encontrada para este artigo.'
+		);
+	} );
+
+	it( 'opens the document sidebar when tags are successfully generated', async () => {
+		fetchAIResponse.mockResolvedValueOnce( [ 'Flamengo' ] );
+		// Return a tag that passes the count > 30 filter.
+		apiFetch.mockResolvedValue( [ { name: 'Flamengo', count: 50 } ] );
 
 		renderPanel();
 		await act( async () => {

@@ -46,5 +46,29 @@ if ( ! class_exists( 'WP_Screen' ) ) {
 	}
 }
 
-// 5. Load the plugin (class is now defined; init() calls our stubbed add_action).
+// 5a. WP_REST_Response stub.
+//     The real class is only available inside a full WordPress environment.
+//     rest_get_link_map() returns new WP_REST_Response(...), so we need this
+//     before requiring the plugin file.
+if ( ! class_exists( 'WP_REST_Response' ) ) {
+	class WP_REST_Response {
+		public mixed $data;
+		public int   $status;
+
+		public function __construct( mixed $data = null, int $status = 200 ) {
+			$this->data   = $data;
+			$this->status = $status;
+		}
+	}
+}
+
+// 5b. WP_REST_Server stub – provides the READABLE constant used in
+//     register_rest_routes(). The actual REST server is not needed in tests.
+if ( ! class_exists( 'WP_REST_Server' ) ) {
+	class WP_REST_Server {
+		const READABLE = 'GET';
+	}
+}
+
+// 6. Load the plugin (class is now defined; init() calls our stubbed add_action).
 require_once __DIR__ . '/../../ai-post-assistant.php';
