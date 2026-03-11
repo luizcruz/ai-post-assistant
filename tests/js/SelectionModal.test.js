@@ -160,7 +160,7 @@ describe( 'SelectionModal – render', () => {
 		await renderModal( 'excerpt' );
 
 		expect(
-			screen.getByRole( 'dialog', { name: 'Sugestões de Resumo' } )
+			screen.getByRole( 'dialog', { name: 'Sugestões de Subtítulo' } )
 		).toBeInTheDocument();
 	} );
 
